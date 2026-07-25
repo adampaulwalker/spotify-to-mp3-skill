@@ -1,0 +1,9 @@
+node_modules/
+# Vendored engine binaries are ~115 MB and are reproducible from the pinned
+# versions + checksums in vendor/binaries.lock.json. Fetch with:
+#   node scripts/fetch-binaries.mjs
+vendor/*/
+!vendor/binaries.lock.json
+*.mcpb
+dist/
+.DS_Store

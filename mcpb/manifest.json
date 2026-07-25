@@ -1,0 +1,78 @@
+{
+  "manifest_version": "0.2",
+  "name": "spotify-playlist-downloader",
+  "display_name": "Spotify Playlist Downloader",
+  "version": "0.1.0",
+  "description": "Download a Spotify playlist as audio files on your own computer.",
+  "long_description": "Paste a Spotify playlist link and this saves the songs as tagged audio files in your Downloads folder. Everything runs on your own machine, and the audio engines are bundled, so there is nothing to install and no terminal to open. Spotify's own audio is copy-protected and is never touched: the playlist link is used to read the track list, and the audio is found on public sources.",
+  "author": {
+    "name": "Adam Walker",
+    "url": "https://github.com/adampaulwalker"
+  },
+  "homepage": "https://github.com/adampaulwalker/spotify-to-mp3-skill",
+  "documentation": "https://github.com/adampaulwalker/spotify-to-mp3-skill#readme",
+  "support": "https://github.com/adampaulwalker/spotify-to-mp3-skill/issues",
+  "license": "MIT",
+  "keywords": ["spotify", "playlist", "music", "download", "mp3"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "SPOTIFY_CLIENT_ID": "${user_config.spotify_client_id}",
+        "SPOTIFY_CLIENT_SECRET": "${user_config.spotify_client_secret}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "start_playlist_download",
+      "description": "Start downloading a Spotify playlist, album, or track."
+    },
+    {
+      "name": "get_download_status",
+      "description": "Check progress, failures, and the output folder for a download."
+    },
+    {
+      "name": "list_download_jobs",
+      "description": "List recent downloads and their status."
+    },
+    {
+      "name": "cancel_download",
+      "description": "Stop a download that is running."
+    },
+    {
+      "name": "open_output_folder",
+      "description": "Open the folder containing the downloaded music."
+    },
+    {
+      "name": "check_setup",
+      "description": "Verify the extension installed correctly and its engines can run."
+    }
+  ],
+  "user_config": {
+    "spotify_client_id": {
+      "type": "string",
+      "title": "Spotify Client ID (optional)",
+      "description": "Leave blank unless downloads start failing with rate limit errors. Everyone shares a default connection to Spotify, which occasionally gets busy. Creating a free app at developer.spotify.com/dashboard gives you your own.",
+      "required": false,
+      "sensitive": true
+    },
+    "spotify_client_secret": {
+      "type": "string",
+      "title": "Spotify Client Secret (optional)",
+      "description": "The matching secret for the Client ID above.",
+      "required": false,
+      "sensitive": true
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}

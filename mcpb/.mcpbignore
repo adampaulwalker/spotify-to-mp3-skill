@@ -1,0 +1,5 @@
+scripts/
+tests/
+.mcpbignore
+*.mcpb
+.DS_Store

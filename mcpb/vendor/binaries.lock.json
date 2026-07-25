@@ -1,0 +1,16 @@
+{
+  "darwin-arm64": {
+    "spotdl": {
+      "version": "4.5.2",
+      "sha256": "0e6a1b704253eda7dda7e85e2a8137b024fdd09cf94e9ab6286350dee95fcabc"
+    },
+    "ytdlp": {
+      "version": "2026.07.04",
+      "sha256": "498bd0dae17855c599d371d68ec5bafc439a9d8640e838be25c765a9792f261b"
+    },
+    "ffmpeg": {
+      "version": "4.1.5",
+      "sha256": "a2ad6f0fc42a3c8f5183ef1d53e906d6bb35478d14a6b67175c30ce6c17e9214"
+    }
+  }
+}
