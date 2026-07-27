@@ -1,6 +1,6 @@
 # GOAL: the MCPB extension is trustworthy enough to hand to a non-technical user
 
-**Created:** 2026-07-26   **Owner:** Adam (final verification)   **Status:** IN PROGRESS
+**Created:** 2026-07-26   **Owner:** Adam (final verification)   **Status:** IN PROGRESS - 2/5 verified, 3 blocked on Adam
 
 ## Done means (binary exit criteria)
 
@@ -33,8 +33,8 @@
 | C1 | Playlist end-to-end | BLOCKED | Needs a playlist URL from Adam. Searching for one hit HTTP 429 on spotDL's shared credentials - the documented rate limit, reproduced live |
 | C2 | ffmpeg licence | **DECISION NEEDED** | Measured: current binary is `--enable-gpl --enable-nonfree`, which FFmpeg states cannot be redistributed at all. `ffmpeg-static` carries the identical flag - both repackage the same osxexperts build. Homebrew's is clean (`gpl`, no `nonfree`) but `--enable-shared`, so not portable. Needs a source build or a product change |
 | C3 | Gatekeeper | **BLOCKED ON ADAM** | Measured: quarantined binary is SIGKILLed (exit 137, zero output); `spctl -a -t execute` returns "rejected". Binaries are adhoc/linker-signed only. Notarization needs a paid Apple Developer account. Mitigation shipped: `check_setup` now names the cause and gives the fix command |
-| C4 | Crash vs unavailability | **DONE** | `worker.js` distinguishes death-by-signal and unexplained early exit from per-track unavailability; e2e still passes after the change |
-| C5 | Codex final review | IN FLIGHT | Round 3 running |
+| C4 | Crash vs unavailability | **DONE** | Hardened after Codex round 3 found the mixed case (one real failure logged, then a crash) still reported completed. Evidence gathered: spotDL exits 0 even with an unavailable track (two album runs, engineExit 0), so non-zero + unexplained gaps now means interrupted. Album e2e re-run clean: 10/10 |
+| C5 | Codex final review | **DONE** | Round 3 returned 4 findings, all fixed: mixed-case crash detection, `os.arch()` misreading hardware under Rosetta, and a stale `cancelRequested` field. Codex confirmed the marker-file cancellation is race-free |
 
 ## Verified (with evidence)
 
@@ -46,6 +46,9 @@
 | Intel Mac refusal | `unsupportedPlatformReason()` returns an explanation instead of an opaque exec failure | 2026-07-25 |
 
 ## Log
+- 2026-07-26 - Codex round 3: 4 findings, all fixed. Album e2e re-run 10/10
+  (the track that failed earlier was transient, which the reporting handled
+  correctly in both directions). Smoke 6/6.
 
 - 2026-07-25 - Built extension, two Codex review rounds, 15 defects fixed.
 - 2026-07-26 - Goal formalised with binary criteria. Five criteria open.

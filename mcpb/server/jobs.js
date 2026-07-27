@@ -34,7 +34,6 @@ export async function createJob(fields) {
     failed: [],
     error: null,
     workerPid: null,
-    cancelRequested: false,
     ...fields,
   };
   await saveJob(job);

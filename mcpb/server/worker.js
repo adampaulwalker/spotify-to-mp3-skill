@@ -297,13 +297,18 @@ async function main() {
     // things to the user: unavailable tracks are final, whereas a crash means
     // the remaining tracks were never attempted and retrying is worth it.
     //
-    // Death by signal is unambiguous. Otherwise the tell is unexplained
-    // absence: the engine stopped early and never logged a reason for the
-    // tracks it skipped.
-    const explained = failed.reduce((n, f) => n + (f.count ?? 1), 0) - unexplainedCount(failed);
+    // Death by signal is unambiguous. Otherwise the tell is a non-zero exit
+    // combined with tracks that vanished without the engine logging a reason.
+    //
+    // Measured on real runs: spotDL exits 0 even when a track is genuinely
+    // unavailable (two album downloads, 9 of 10, engineExit 0, one logged
+    // AudioProviderError). Normal completed-with-errors is therefore exit 0,
+    // so a non-zero exit with unexplained gaps means the run was interrupted.
+    // An earlier version only flagged this when NOTHING was explained, which
+    // missed the common mixed case: one real failure logged, then a crash.
     const crashed =
       Boolean(result.signal) ||
-      (result.code !== 0 && explained === 0 && downloaded < tracks.length);
+      (result.code !== 0 && unexplainedCount(failed) > 0);
 
     if (crashed) {
       await mergeJob(jobId, { trackCount: downloaded, failed, outputDir });
