@@ -292,10 +292,29 @@ async function main() {
       );
     }
 
-    // A non-zero exit with some files present is the normal shape when a few
-    // tracks were unavailable, but it is also what a mid-run engine crash looks
-    // like. Record the code so the report can say so rather than implying a
-    // clean finish.
+    // Separate a mid-run engine crash from ordinary per-track unavailability.
+    // Both leave files on disk and a non-zero exit, but they mean different
+    // things to the user: unavailable tracks are final, whereas a crash means
+    // the remaining tracks were never attempted and retrying is worth it.
+    //
+    // Death by signal is unambiguous. Otherwise the tell is unexplained
+    // absence: the engine stopped early and never logged a reason for the
+    // tracks it skipped.
+    const explained = failed.reduce((n, f) => n + (f.count ?? 1), 0) - unexplainedCount(failed);
+    const crashed =
+      Boolean(result.signal) ||
+      (result.code !== 0 && explained === 0 && downloaded < tracks.length);
+
+    if (crashed) {
+      await mergeJob(jobId, { trackCount: downloaded, failed, outputDir });
+      throw new Error(
+        `The download engine stopped early after ${downloaded} of ${tracks.length} tracks` +
+          (result.signal ? ` (killed by ${result.signal})` : "") +
+          `. The rest were never attempted, so retrying should pick them up. ` +
+          friendlyEngineError(result.tail),
+      );
+    }
+
     await mergeJob(jobId, {
       trackCount: downloaded,
       failed,
@@ -384,6 +403,11 @@ async function readFailures(errorsLog, total, downloaded) {
   }
 
   return capped;
+}
+
+/** Tracks covered by the catch-all entry rather than by a real engine message. */
+function unexplainedCount(failed = []) {
+  return failed.reduce((n, f) => n + (f.count ?? 0), 0);
 }
 
 /**

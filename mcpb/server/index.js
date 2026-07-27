@@ -20,6 +20,8 @@ import {
   defaultOutputRoot,
   IS_WINDOWS,
   unsupportedPlatformReason,
+  isQuarantined,
+  BUNDLE_ROOT,
 } from "./paths.js";
 import {
   createJob,
@@ -208,17 +210,38 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         );
 
         const ok = results.every((r) => r.ok);
-        return text(
-          [
-            ok
-              ? "Setup looks good. Everything needed is bundled with the extension, and all three engines run."
-              : "Something is wrong with the bundled engines. Reinstalling the extension is the usual fix.",
-            "",
-            ...results.map((r) => r.line),
-            "",
-            `Music will be saved to: ${defaultOutputRoot()}`,
-          ].join("\n"),
+
+        // A quarantined engine is killed by Gatekeeper with no output at all,
+        // so name that cause explicitly rather than leaving the user with an
+        // unexplained failure.
+        const quarantined = ["spotdl", "ffmpeg", "yt-dlp"].filter((b) =>
+          isQuarantined(enginePath(b)),
         );
+
+        const lines = [
+          ok
+            ? "Setup looks good. Everything needed is bundled with the extension, and all three engines run."
+            : "Something is wrong with the bundled engines.",
+          "",
+          ...results.map((r) => r.line),
+        ];
+
+        if (quarantined.length) {
+          lines.push(
+            "",
+            "macOS has marked these files as downloaded from the internet and is",
+            "blocking them: " + quarantined.join(", ") + ".",
+            "",
+            "This extension is not yet signed by Apple, so macOS refuses to run",
+            "its audio engines. Removing the download flag fixes it. Paste this",
+            "into Terminal, then ask me to check setup again:",
+            "",
+            `  xattr -dr com.apple.quarantine "${path.join(BUNDLE_ROOT, "vendor")}"`,
+          );
+        }
+
+        lines.push("", `Music will be saved to: ${defaultOutputRoot()}`);
+        return text(lines.join("\n"));
       }
 
       case "start_playlist_download": {
