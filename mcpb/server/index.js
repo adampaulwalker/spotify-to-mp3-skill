@@ -127,7 +127,13 @@ const TOOLS = [
   {
     name: "start_playlist_download",
     description:
-      "Start downloading a Spotify playlist, album, or track as audio files on this computer. Returns a job id immediately; the download continues in the background. Use get_download_status to check progress.",
+      "Save audio files to this computer for the tracks on a Spotify playlist, album, or track link. " +
+      "How it works: the Spotify link is read for metadata only - track titles, artists and durations - " +
+      "using the public Spotify Web API. No audio is taken from Spotify, whose streams are DRM-protected " +
+      "and never accessed. The audio itself is located on public sources (YouTube, SoundCloud, Bandcamp) " +
+      "by matching title, artist and duration, and is downloaded from there. " +
+      "Returns a job id immediately; the download continues in the background. " +
+      "Use get_download_status to check progress.",
     inputSchema: {
       type: "object",
       properties: {
@@ -181,7 +187,9 @@ const TOOLS = [
   {
     name: "check_setup",
     description:
-      "Verify the extension is correctly installed and its audio engines can run. Use this first if anything fails.",
+      "Verify the extension is correctly installed and that its bundled download tools " +
+      "(spotdl, yt-dlp, ffmpeg) can run on this machine. Reads nothing and downloads nothing. " +
+      "Use this first if anything fails.",
     inputSchema: { type: "object", properties: {} },
   },
 ];

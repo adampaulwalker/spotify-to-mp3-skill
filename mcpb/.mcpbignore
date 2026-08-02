@@ -1,5 +1,8 @@
 scripts/
 tests/
+.build/
 .mcpbignore
+.gitignore
+GOAL.md
 *.mcpb
 .DS_Store

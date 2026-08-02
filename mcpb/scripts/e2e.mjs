@@ -82,8 +82,13 @@ if (!jobId) {
 
 // Poll to a terminal phase rather than sleeping a fixed amount - the whole point
 // of the job model is that the caller does not know how long this takes.
+//
+// 25 minutes, not 7. A 10-track album took under 5 minutes on a fast connection
+// and over 20 through a VPN, and the short deadline reported three separate
+// "failures" for runs that were downloading correctly the whole time. A test
+// that calls working software broken is worse than no test.
 let status = "";
-const deadline = Date.now() + 7 * 60 * 1000;
+const deadline = Date.now() + 25 * 60 * 1000;
 while (Date.now() < deadline) {
   await new Promise((r) => setTimeout(r, 5000));
   status = await callText("get_download_status", { job_id: jobId });

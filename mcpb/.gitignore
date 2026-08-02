@@ -1,4 +1,6 @@
 node_modules/
+# ffmpeg source tree fetched by scripts/build-ffmpeg.sh. 12k files, 2.2M lines.
+.build/
 # Vendored engine binaries are ~115 MB and are reproducible from the pinned
 # versions + checksums in vendor/binaries.lock.json. Fetch with:
 #   node scripts/fetch-binaries.mjs
