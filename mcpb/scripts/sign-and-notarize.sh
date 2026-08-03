@@ -73,12 +73,34 @@ fi
 # hardened runtime, which notarization requires. --timestamp embeds a trusted
 # timestamp so the signature stays valid after the certificate expires.
 
+ENTITLEMENTS="$ROOT/scripts/pyinstaller.entitlements"
+
 echo "==> signing bundled engines"
 for bin in ffmpeg spotdl yt-dlp; do
   path="$VENDOR/$bin"
   [ -f "$path" ] || { echo "missing $path" >&2; exit 1; }
-  codesign --force --timestamp --options runtime \
-    --sign "$IDENTITY" "$path"
+
+  # spotdl and yt-dlp are PyInstaller bundles: they extract an embedded Python
+  # runtime and its shared libraries at startup and execute them. Under the
+  # hardened runtime that is blocked, so they sign cleanly and then refuse to
+  # run. ffmpeg is a plain native binary and needs no entitlements.
+  ent=()
+  case "$bin" in
+    spotdl|yt-dlp) ent=(--entitlements "$ENTITLEMENTS") ;;
+  esac
+
+  # Retry once on failure. codesign intermittently returns
+  # errSecInternalComponent when signing several binaries back to back - seen on
+  # yt-dlp, the only universal (x86_64 + arm64) binary here, which has roughly
+  # twice the hashes to compute. An immediate retry succeeds. Failing the whole
+  # build on a transient keychain race is not worth it.
+  if ! codesign --force --timestamp --options runtime "${ent[@]+"${ent[@]}"}" \
+       --sign "$IDENTITY" "$path" 2>/dev/null; then
+    echo "    retrying $bin after a transient signing error"
+    sleep 2
+    codesign --force --timestamp --options runtime "${ent[@]+"${ent[@]}"}" \
+      --sign "$IDENTITY" "$path"
+  fi
   codesign --verify --strict --verbose=1 "$path" 2>&1 | sed 's/^/    /'
 done
 
@@ -114,11 +136,30 @@ xcrun notarytool submit "$BUNDLE" \
   --keychain-profile "$KEYCHAIN_PROFILE" \
   --wait
 
-# A .mcpb is a zip, and a ticket cannot be stapled to a zip - only to the things
-# inside it. Gatekeeper still validates online, but stapling the binaries first
-# means the extension works even offline.
-echo "==> verifying notarization"
-spctl -a -vv -t install "$BUNDLE" 2>&1 | sed 's/^/    /' || true
+# Verify by running the binaries under quarantine, not with spctl.
+#
+# `spctl -a -t install` on a .mcpb always reports "rejected: no usable
+# signature" - a .mcpb is a zip, and a zip carries no signature. The signatures
+# live on the binaries inside it. That check looks like a failure and is simply
+# the wrong tool, so it is replaced with the test that reflects reality: extract
+# a quarantined copy and execute each engine, exactly as a user's machine does.
+echo "==> verifying under quarantine (what a downloaded copy actually faces)"
+QT="$(mktemp -d)"
+cp "$BUNDLE" "$QT/" 
+xattr -w com.apple.quarantine "0083;0;Safari;$(uuidgen)" "$QT/$(basename "$BUNDLE")"
+unzip -qo "$QT/$(basename "$BUNDLE")" -d "$QT/x"
+fail=0
+for b in ffmpeg spotdl yt-dlp; do
+  a="--version"; [ "$b" = "ffmpeg" ] && a="-version"
+  if "$QT/x/vendor/darwin-arm64/$b" "$a" >/dev/null 2>&1; then
+    echo "    OK      $b runs while quarantined"
+  else
+    echo "    BLOCKED $b was killed by Gatekeeper" >&2
+    fail=1
+  fi
+done
+rm -rf "$QT"
+[ "$fail" -eq 0 ] || { echo "Notarization did not take effect." >&2; exit 1; }
 
 echo
 echo "Done. Verify the real user experience before shipping:"

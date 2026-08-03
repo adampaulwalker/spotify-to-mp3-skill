@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the PyInstaller-packaged engines (spotdl, yt-dlp).
+
+  A PyInstaller "onefile" binary extracts an embedded Python runtime plus its
+  shared libraries to a temp directory at startup and executes them. The
+  hardened runtime, which notarization requires, blocks both of those by
+  default - the binary signs fine and then dies the moment it is run.
+
+  Measured: with the hardened runtime and no entitlements, spotdl fails to
+  execute at all after signing. ffmpeg is a plain native binary and needs
+  neither of these, so it is signed without this file.
+
+  allow-unsigned-executable-memory - the extracted Python interpreter maps
+    executable pages that Apple did not sign.
+  disable-library-validation - the extracted .so/.dylib files are not signed by
+    the same team ID as the host binary, which library validation would refuse.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>
