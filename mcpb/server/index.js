@@ -40,7 +40,7 @@ const SPOTIFY_URL =
   /^https?:\/\/open\.spotify\.com\/(intl-[a-z]{2}\/)?(playlist|album|track)\/[A-Za-z0-9]+/;
 
 const server = new Server(
-  { name: "spotify-playlist-downloader", version: "0.2.2" },
+  { name: "spotify-playlist-downloader", version: "0.2.4" },
   { capabilities: { tools: {} } },
 );
 

@@ -274,11 +274,15 @@ async function main() {
     // Milestones every 25%, so a long playlist reports in without becoming
     // noise. A short job crosses several at once, hence the >= and the guard.
     let lastMilestone = 0;
+    let lastCount = -1;
+    let lastProgressAt = Date.now();
+    const STALL_MS = 15 * 60 * 1000;
     const poll = setInterval(async () => {
       const count = Math.min(await countAudioFiles(outputDir), tracks.length);
       const current = await loadJob(jobId);
       if (current && count !== current.trackCount) {
         await mergeJob(jobId, { trackCount: count });
+        lastProgressAt = Date.now();
         const pct = Math.floor((count / tracks.length) * 100);
         const milestone = Math.floor(pct / 25) * 25;
         if (milestone > lastMilestone && milestone < 100) {
@@ -286,6 +290,14 @@ async function main() {
           notify(playlistName, `${count} of ${tracks.length} downloaded`);
         }
       }
+      // A download that has produced nothing for fifteen minutes is stuck, not
+      // slow. Killing it surfaces a real error and keeps the files already on
+      // disk, which beats a job that reports "downloading" indefinitely.
+      if (count === lastCount && Date.now() - lastProgressAt > STALL_MS) {
+        await log(`STALL: no progress for ${STALL_MS / 60000} minutes, stopping`);
+        killTree(currentChild);
+      }
+      lastCount = count;
     }, POLL_MS);
 
     const errorsLog = path.join(workDir, "errors.log");
@@ -304,6 +316,13 @@ async function main() {
         String(job.threads || 4),
         "--ffmpeg",
         ffmpeg,
+        // Without a socket timeout yt-dlp waits indefinitely on a stalled
+        // read. Observed hanging 27 minutes mid-playlist with the process
+        // alive and no output, which is indistinguishable from "slow" to
+        // anyone watching. A bounded wait plus retries turns a dead job into
+        // one skipped track.
+        "--yt-dlp-args",
+        "--socket-timeout 30 --retries 3",
         "--save-errors",
         errorsLog,
         ...credArgs,
