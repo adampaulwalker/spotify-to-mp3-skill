@@ -13,7 +13,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUNDLE="$ROOT/spotify-playlist-downloader-0.2.0.mcpb"
+BUNDLE="$ROOT/spotify-playlist-downloader-0.2.2.mcpb"
 VENDOR="$ROOT/vendor/darwin-arm64"
 KEYCHAIN_PROFILE="${NOTARY_PROFILE:-spotify-mcpb-notary}"
 

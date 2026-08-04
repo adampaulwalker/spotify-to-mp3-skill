@@ -12,6 +12,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { spawn } from "node:child_process";
+import { runJob } from "./worker.js";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,7 +40,7 @@ const SPOTIFY_URL =
   /^https?:\/\/open\.spotify\.com\/(intl-[a-z]{2}\/)?(playlist|album|track)\/[A-Za-z0-9]+/;
 
 const server = new Server(
-  { name: "spotify-playlist-downloader", version: "0.1.0" },
+  { name: "spotify-playlist-downloader", version: "0.2.2" },
   { capabilities: { tools: {} } },
 );
 
@@ -274,19 +275,27 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           outputRoot: defaultOutputRoot(),
         });
 
-        // Detached and unref'd on purpose: the download must outlive this
-        // server process, which Claude Desktop may restart at any time.
-        const child = spawn(process.execPath, [WORKER, job.id], {
-          detached: true,
-          stdio: "ignore",
-          env: process.env,
-        });
-        child.unref();
-
-        // Record the pid here rather than waiting for the worker to write it.
-        // If the worker dies before its first save, a job with no pid looks
-        // alive to reconcile() and would sit at "queued" forever.
-        await updateJob(job.id, { workerPid: child.pid });
+        // Run the download in THIS process, deliberately, rather than
+        // spawning a child.
+        //
+        // Claude Desktop hosts this server under Electron, so process.execPath
+        // is the Claude binary, not node. Spawning it launches a second copy of
+        // the entire app - observed booting a browser stack and colliding with
+        // the running instance's database lock - and ELECTRON_RUN_AS_NODE does
+        // not change that. Every spawn attempt produced a job stuck at
+        // "queued" with no log line written and no visible error.
+        //
+        // Not awaited: the tool call must return an id immediately. The catch
+        // is required because an unhandled rejection here would take the whole
+        // MCP server down.
+        //
+        // Trade-off accepted: the download no longer survives Claude Desktop
+        // quitting. reconcile() already reports an interrupted job honestly,
+        // and a design property that never once worked is worth less than a
+        // download that starts. The CLI still spawns a real detached process,
+        // where a real node exists.
+        runJob(job.id).catch(() => {});
+        await updateJob(job.id, { workerPid: process.pid });
 
         return text(
           [

@@ -7,6 +7,7 @@
 
 import { spawn } from "node:child_process";
 import { mkdir, readdir, writeFile, appendFile, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import {
   enginePath,
@@ -44,15 +45,13 @@ function outputTemplate(url) {
   return TEMPLATES[kind] ?? TEMPLATES.track;
 }
 
-const jobId = process.argv[2];
-if (!jobId) {
-  process.stderr.write("worker: missing job id\n");
-  process.exit(2);
-}
-
-const logPath = path.join(appDataDir(), "logs", `${jobId}.log`);
+// Set by runJob(). Module-level because the helpers below close over it, and
+// the worker only ever handles one job per invocation.
+let jobId = null;
+let logPath = null;
 
 async function log(line) {
+  if (!logPath) return;
   await mkdir(path.dirname(logPath), { recursive: true });
   await appendFile(logPath, `[${new Date().toISOString()}] ${line}\n`);
 }
@@ -160,6 +159,26 @@ function startCancelWatch() {
   return () => clearInterval(timer);
 }
 
+/**
+ * Post a macOS notification.
+ *
+ * The chat window is turn-based, so the extension can only report progress when
+ * asked. Notifications close that gap: the user starts a job and is told when it
+ * passes milestones and when it finishes, without having to ask.
+ *
+ * Failures are swallowed on purpose. A notification is a nicety, and a download
+ * should never die because Notification Centre was unhappy.
+ */
+function notify(title, message) {
+  if (IS_WINDOWS) return;
+  const esc = (s) => String(s).replace(/["\\]/g, "\\$&");
+  spawn(
+    "osascript",
+    ["-e", `display notification "${esc(message)}" with title "${esc(title)}"`],
+    { stdio: "ignore", detached: true },
+  ).unref();
+}
+
 /** Checked at every phase boundary as well as by the watcher. */
 function isCancelled() {
   if (cancelSeen) return true;
@@ -234,20 +253,38 @@ async function main() {
     const playlistName =
       tracks[0]?.list_name || tracks[0]?.album_name || "playlist";
     await mergeJob(jobId, { trackTotal: tracks.length, playlistName });
+    notify(
+      playlistName,
+      `Starting ${tracks.length} track${tracks.length === 1 ? "" : "s"}`,
+    );
 
     // --- Phase 2: download -----------------------------------------------
-    const outputDir = path.join(
-      job.outputRoot || defaultOutputRoot(),
-      `${sanitizeFolderName(playlistName)} (${jobId})`,
-    );
+    //
+    // Plain playlist name, with the job id appended only if that folder already
+    // exists. The id used to be unconditional, which guaranteed uniqueness and
+    // made every folder look like a machine artefact. Re-running the same
+    // playlist is rare; an ugly name every time is not.
+    const root = job.outputRoot || defaultOutputRoot();
+    const base = sanitizeFolderName(playlistName);
+    let outputDir = path.join(root, base);
+    if (existsSync(outputDir)) outputDir = path.join(root, `${base} (${jobId})`);
     await mkdir(outputDir, { recursive: true });
     await mergeJob(jobId, { phase: "downloading", outputDir });
 
+    // Milestones every 25%, so a long playlist reports in without becoming
+    // noise. A short job crosses several at once, hence the >= and the guard.
+    let lastMilestone = 0;
     const poll = setInterval(async () => {
       const count = Math.min(await countAudioFiles(outputDir), tracks.length);
       const current = await loadJob(jobId);
       if (current && count !== current.trackCount) {
         await mergeJob(jobId, { trackCount: count });
+        const pct = Math.floor((count / tracks.length) * 100);
+        const milestone = Math.floor(pct / 25) * 25;
+        if (milestone > lastMilestone && milestone < 100) {
+          lastMilestone = milestone;
+          notify(playlistName, `${count} of ${tracks.length} downloaded`);
+        }
       }
     }, POLL_MS);
 
@@ -329,6 +366,13 @@ async function main() {
     });
     const fresh = await loadJob(jobId);
     await writeReport(outputDir, fresh);
+    const missing = missingTrackCount(fresh);
+    notify(
+      `${fresh.playlistName || "Download"} finished`,
+      missing > 0
+        ? `${downloaded} of ${tracks.length} saved, ${missing} unavailable`
+        : `All ${downloaded} track${downloaded === 1 ? "" : "s"} saved`,
+    );
     return finish("completed");
   } finally {
     stopWatch();
@@ -456,15 +500,47 @@ async function writeReport(outputDir, job) {
 
 async function finish(phase) {
   await mergeJob(jobId, { phase, workerPid: null });
-  process.exit(0);
 }
 
-main().catch(async (err) => {
-  await log(`FATAL ${err?.stack || err}`);
-  await mergeJob(jobId, {
-    phase: "failed",
-    error: String(err?.message || err),
-    workerPid: null,
-  });
-  process.exit(1);
-});
+
+
+/**
+ * Run a job to completion in the current process.
+ *
+ * Exported because Claude Desktop cannot spawn a child process at all: it hosts
+ * the MCP server under Electron, so process.execPath is the Claude binary.
+ * Spawning it launches a second copy of the whole app - observed booting a
+ * browser stack and colliding with the running instance's database lock - and
+ * ELECTRON_RUN_AS_NODE does not change that. The download therefore runs inside
+ * the server process there.
+ *
+ * The CLI still spawns this file as a detached child, because a real node is
+ * available in a terminal and that keeps long downloads alive after the shell
+ * closes.
+ */
+export async function runJob(id) {
+  jobId = id;
+  logPath = path.join(appDataDir(), "logs", `${id}.log`);
+  try {
+    await main();
+  } catch (err) {
+    await log(`FATAL ${err?.stack || err}`);
+    notify("Download failed", String(err?.message || err).slice(0, 180));
+    await mergeJob(id, {
+      phase: "failed",
+      error: String(err?.message || err),
+      workerPid: null,
+    });
+  }
+}
+
+// CLI entry: only when executed directly, not when imported.
+if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+  const id = process.argv[2];
+  if (!id) {
+    process.stderr.write("worker: missing job id\n");
+    process.exit(2);
+  }
+  await runJob(id);
+  process.exit(0);
+}

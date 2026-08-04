@@ -1,6 +1,6 @@
 {
   "name": "spotify-playlist-downloader-mcpb",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "Claude Desktop extension that downloads a Spotify playlist as tagged MP3s on your own machine",
   "type": "module",
   "private": true,
