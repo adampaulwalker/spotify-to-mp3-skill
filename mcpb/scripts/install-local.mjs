@@ -85,7 +85,14 @@ writeFileSync(REGISTRY, JSON.stringify(registry, null, 2));
 // Verify against source rather than trusting the copy. Every install this week
 // that "looked fine" was checked by hash before it was believed.
 let stale = 0;
-for (const f of ["server/index.js", "server/worker.js", "server/paths.js", "manifest.json"]) {
+for (const f of [
+  "server/index.js",
+  "server/worker.js",
+  "server/paths.js",
+  "server/jobs.js",
+  "server/spotify.js",
+  "manifest.json",
+]) {
   const a = createHash("sha256").update(readFileSync(path.join(dest, f))).digest("hex");
   const b = createHash("sha256").update(readFileSync(path.join(ROOT, f))).digest("hex");
   const ok = a === b;
