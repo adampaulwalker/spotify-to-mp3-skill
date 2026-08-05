@@ -37,11 +37,20 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKER = path.join(HERE, "worker.js");
 
+// Anchored at both ends. The unanchored version matched only the prefix, so
+// `https://open.spotify.com/playlist/abc"; rm -rf /` passed validation and the
+// whole string was handed to the engine. Not a live injection - arguments go
+// through spawn() with an array and never touch a shell - but it let malformed
+// input reach the engine, produced a confusing failure instead of a clean
+// rejection, and would become dangerous the moment anything used a shell.
+//
+// A trailing query string is allowed because Spotify's share links carry one
+// (?si=...); anything else is rejected.
 const SPOTIFY_URL =
-  /^https?:\/\/open\.spotify\.com\/(intl-[a-z]{2}\/)?(playlist|album|track)\/[A-Za-z0-9]+/;
+  /^https?:\/\/open\.spotify\.com\/(intl-[a-z]{2}\/)?(playlist|album|track)\/[A-Za-z0-9]{16,32}(\?[A-Za-z0-9_=&%.-]*)?$/;
 
 const server = new Server(
-  { name: "spotify-playlist-downloader", version: "0.3.1" },
+  { name: "spotify-playlist-downloader", version: "0.3.2" },
   { capabilities: { tools: {} } },
 );
 
