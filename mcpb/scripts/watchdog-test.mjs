@@ -89,20 +89,61 @@ const worker = await import("node:fs").then(({ readFileSync }) =>
   readFileSync(new URL("../server/worker.js", import.meta.url), "utf8"),
 );
 check(
-  "metadata phase checks timedOut",
-  /if \(saved\.timedOut\)/.test(worker),
-);
-check(
-  "it is checked BEFORE the exit code",
-  worker.indexOf("saved.timedOut") < worker.indexOf("saved.code !== 0"),
-);
-check(
   "download phase treats a timeout as a crash",
   /Boolean\(result\.timedOut\)/.test(worker),
 );
 check(
-  "the failure message explains itself",
-  /produced no output for/.test(worker),
+  "the failure message says how far it got",
+  /stopped early after \$\{downloaded\} of \$\{tracks\.length\} tracks/.test(worker),
+);
+check(
+  "and tells the user retrying will resume",
+  /retrying should pick them up/.test(worker),
+);
+
+// The metadata phase used to spawn `spotdl save` and guard it with this same
+// watchdog. It no longer does: reading the track list moved in-process to
+// server/spotify.js, where each request carries its own timeout instead of a
+// watchdog inferring a hang from silence.
+//
+// These assertions are kept pointing at that change rather than deleted,
+// because the original risk has not gone away - it moved. A timeout must still
+// never be mistaken for a clean finish, it is just enforced per request now.
+const spotify = await import("node:fs").then(({ readFileSync }) =>
+  readFileSync(new URL("../server/spotify.js", import.meta.url), "utf8"),
+);
+check(
+  "the metadata phase no longer spawns spotdl save",
+  !/"save",\s*job\.url/.test(worker),
+);
+check(
+  "every Spotify request carries an abort timeout",
+  /AbortController/.test(spotify) && /setTimeout\(\(\) => ac\.abort\(\)/.test(spotify),
+);
+check(
+  "retries are bounded, not endless",
+  /MAX_ATTEMPTS/.test(spotify) && /attempt <= MAX_ATTEMPTS/.test(spotify),
+);
+check(
+  "a long Retry-After is surfaced rather than slept through",
+  /MAX_RETRY_AFTER_MS/.test(spotify),
+);
+// Comments stripped first - spotify.js explains at length WHY it does not fall
+// back to `spotdl save`, and matching that prose was a false positive on the
+// first version of this check.
+const spotifyCode = spotify
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
+// Narrowly: no invocation of the engine. The SPOTDL_DEFAULT_* credential
+// constants are named after spotdl and are fine - matching the bare word
+// "spotdl" flagged those, which is not what this guards.
+check(
+  "there is no fallback to the path that hangs",
+  !/child_process|spawn\(|execFile|enginePath/.test(spotifyCode),
+);
+check(
+  "resolving the track list stays in-process",
+  !/"save"|'save'/.test(spotifyCode),
 );
 
 console.log("\n" + "=".repeat(46));

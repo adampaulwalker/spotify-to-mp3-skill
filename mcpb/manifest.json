@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "spotify-playlist-downloader",
   "display_name": "Spotify Playlist Downloader",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "description": "Save audio files for the tracks on a Spotify playlist. Reads the playlist for track names only; finds the audio on public sources.",
   "long_description": "Paste a Spotify playlist link and this saves the songs as tagged audio files in your Downloads folder. Everything runs on your own machine, and the audio engines are bundled, so there is nothing to install and no terminal to open. Spotify's own audio is copy-protected and is never touched: the playlist link is used to read the track list, and the audio is found on public sources.",
   "author": {
