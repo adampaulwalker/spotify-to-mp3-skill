@@ -51,6 +51,33 @@ before he does.
 
 ## Log
 
+- 2026-08-05 - Iteration 5. Adam hit the metadata hang again on the installed
+  v0.3.3. Two hypotheses raised and BOTH DISPROVEN by testing:
+  1. "Shared Spotify credentials are rate-limited." Ran the identical command
+     with Adam's own credentials - hung the same way, 10 minutes, no output.
+  2. "spotdl save cannot handle a 116-track playlist." The same command, same
+     playlist, WITHOUT credentials, completed earlier the same day in
+     test-all.sh, resolving 110 tracks and passing the numbering check.
+
+  So the hang is INTERMITTENT, not deterministic, and neither hypothesis holds.
+  Most likely Spotify-side throttling that varies with recent API volume - the
+  API was hit hard all day by repeated attempts, and direct calls returned 429
+  twice.
+
+  The product defect, independent of cause: spotdl retries silently and forever
+  with no ceiling. The 15-minute watchdog will catch it and report honestly, but
+  fifteen minutes of a bare menu bar icon and "still in metadata" is the exact
+  experience Adam keeps hitting.
+
+  **Honest testing gap:** I claimed the playlist path was verified. It ran
+  successfully once, when the API happened to cooperate. I never ran it enough
+  times to see that it is flaky. Adam found that; I did not.
+
+  Proposed (not yet implemented, under review by the multi-llm panel):
+  a. Drop the metadata silence budget from 15 minutes to ~6.
+  b. Show elapsed time in the menu bar during metadata (`reading... 4m`).
+  c. On timeout, say what to do next: wait and retry, or add own credentials.
+
 - 2026-08-05 - Iteration 4. Regression sweep clean: 49/49 across four layers
   (smoke 6, edge-probe 13, watchdog 11, fault 19). No new defects.
   Attempted to close C1 with Creative Commons material so the licensing question
