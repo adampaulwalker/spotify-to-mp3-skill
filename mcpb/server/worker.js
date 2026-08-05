@@ -33,6 +33,144 @@ const POLL_MS = 4000;
 const METADATA_SILENCE_MS = 15 * 60 * 1000;
 const DOWNLOAD_SILENCE_MS = 5 * 60 * 1000;
 
+// spotdl ships these publicly in its own config so it works without the user
+// registering a Spotify app. Every spotdl user on earth shares them, and that
+// pool does run dry: measured 2026-08-05, api.spotify.com answered
+// {"error":{"status":429,"reason":"QUOTA_EXCEEDED"}} with Retry-After 86400 -
+// a 24-hour lockout affecting every install at once.
+//
+// These are only ever used for the preflight below, which makes exactly one
+// request. The actual track resolution still runs through spotdl, which uses
+// the same values internally, so this asks the same question spotdl is about
+// to ask, just early enough to answer the user honestly.
+const SPOTDL_DEFAULT_CLIENT_ID = "5f573c9620494bae87890c0f08a60293";
+const SPOTDL_DEFAULT_CLIENT_SECRET = "212476d9b0f3472eaa762d90b19b0ba8";
+
+const PREFLIGHT_TIMEOUT_MS = 20 * 1000;
+
+function hoursFromNow(seconds) {
+  const h = Math.round(seconds / 3600);
+  if (h >= 2) return `about ${h} hours`;
+  const m = Math.max(1, Math.round(seconds / 60));
+  return m >= 60 ? "about an hour" : `about ${m} minutes`;
+}
+
+async function spotifyJson(url, options, timeoutMs = PREFLIGHT_TIMEOUT_MS) {
+  // An explicit timeout is the entire point. The failure this whole preflight
+  // exists to prevent is a request that never returns and never times out.
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: ac.signal });
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    return { status: res.status, headers: res.headers, body };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Ask Spotify one cheap question before handing the link to spotdl.
+ *
+ * Deliberately narrow: this may only FAIL a job for a cause it is certain
+ * about - an exhausted quota, rejected credentials, or a link that does not
+ * exist. Anything else (offline, DNS, a 5xx, an abort) resolves as "unknown"
+ * and the job proceeds to spotdl as before. A preflight that can veto a run on
+ * a guess is just a new way to fail a download that would have worked.
+ */
+async function preflightSpotify(url) {
+  const usingOwn = Boolean(
+    process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET,
+  );
+  const id = process.env.SPOTIFY_CLIENT_ID || SPOTDL_DEFAULT_CLIENT_ID;
+  const secret = process.env.SPOTIFY_CLIENT_SECRET || SPOTDL_DEFAULT_CLIENT_SECRET;
+
+  const match = /\/(playlist|album|track)\/([A-Za-z0-9]+)/.exec(url);
+  if (!match) return { ok: true, checked: false };
+  const [, kind, spotifyId] = match;
+
+  let token;
+  try {
+    const auth = Buffer.from(`${id}:${secret}`).toString("base64");
+    const res = await spotifyJson("https://accounts.spotify.com/api/token", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "grant_type=client_credentials",
+    });
+    if (res.status === 400 || res.status === 401) {
+      throw new Error(
+        usingOwn
+          ? "Spotify rejected the client ID and secret in this extension's settings. " +
+            "Check they were pasted in full, or clear both fields to fall back to the built-in ones."
+          : "Spotify rejected the built-in credentials. This usually means the extension needs an update.",
+      );
+    }
+    token = res.body?.access_token;
+    if (!token) return { ok: true, checked: false };
+  } catch (err) {
+    if (err instanceof Error && /Spotify rejected/.test(err.message)) throw err;
+    return { ok: true, checked: false }; // offline or unreachable - let spotdl try
+  }
+
+  const endpoint =
+    kind === "playlist"
+      ? `https://api.spotify.com/v1/playlists/${spotifyId}?fields=name,tracks(total)`
+      : kind === "album"
+        ? `https://api.spotify.com/v1/albums/${spotifyId}`
+        : `https://api.spotify.com/v1/tracks/${spotifyId}`;
+
+  let res;
+  try {
+    res = await spotifyJson(endpoint, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    return { ok: true, checked: false };
+  }
+
+  if (res.status === 429) {
+    const retryAfter = Number(res.headers.get("retry-after") || 0);
+    const wait = retryAfter ? hoursFromNow(retryAfter) : "a while";
+    throw new Error(
+      usingOwn
+        ? `Spotify has temporarily rate-limited your credentials. They should work again in ${wait}. ` +
+          "Nothing was downloaded, and starting the job again after that is safe."
+        : "Spotify's limit for this app's shared credentials is used up, so the track list cannot be " +
+          `read right now. It resets in ${wait}.\n\n` +
+          "To avoid waiting, you can add your own free Spotify credentials in this extension's " +
+          "settings: create an app at developer.spotify.com/dashboard, then paste its Client ID " +
+          "and Client Secret into the extension's Client ID and Client Secret fields.\n\n" +
+          "Nothing was downloaded.",
+    );
+  }
+
+  if (res.status === 404) {
+    throw new Error(
+      `That Spotify ${kind} could not be found. It may have been deleted, or it may be private - ` +
+        "a link only works here if the playlist is public.",
+    );
+  }
+
+  if (res.status >= 200 && res.status < 300) {
+    return {
+      ok: true,
+      checked: true,
+      name: res.body?.name ?? null,
+      total: res.body?.tracks?.total ?? null,
+    };
+  }
+
+  return { ok: true, checked: false };
+}
+
 // The leading list position is not decoration. Without it, two tracks with the
 // same artist and title - a clean and an explicit cut, or the same song on two
 // albums - collapse onto one filename, so the file count undershoots and the
@@ -355,10 +493,29 @@ async function main() {
       );
     }
 
+    // Fail fast on the causes Spotify will tell us about directly, rather than
+    // handing the link to spotdl and watching it go quiet for eight minutes.
+    const pre = await preflightSpotify(job.url);
+    if (isCancelled()) return finish("cancelled");
+    if (pre.checked) {
+      await mergeJob(jobId, {
+        playlistName: pre.name ?? job.playlistName,
+        expectedTracks: pre.total ?? null,
+      });
+    }
+
+    // Scale the budget to the work. spotdl resolves each track separately, so a
+    // flat ceiling is either far too long for a ten-track album or too short
+    // for a large playlist. When the count is unknown, fall back to the old
+    // fixed budget rather than guessing low and killing a healthy run.
+    const silenceMs = pre.total
+      ? Math.min(METADATA_SILENCE_MS, 90 * 1000 + pre.total * 3000)
+      : METADATA_SILENCE_MS;
+
     const saved = await run(
       spotdl,
       ["save", job.url, "--save-file", saveFile, ...credArgs],
-      { silenceMs: METADATA_SILENCE_MS },
+      { silenceMs },
     );
 
     if (isCancelled()) return finish("cancelled");
@@ -369,8 +526,12 @@ async function main() {
     if (saved.timedOut) {
       throw new Error(
         "Reading the track list stalled: the engine produced no output for " +
-          `${METADATA_SILENCE_MS / 60000} minutes. This is usually a dropped ` +
-          "network connection. Nothing was downloaded; starting the job again is safe.",
+          `${Math.round(silenceMs / 60000)} minutes. It opens many connections to ` +
+          "Spotify at once and waits indefinitely if one of them stops responding, " +
+          "so this is usually an unsteady internet connection rather than a problem " +
+          "with the playlist.\n\n" +
+          "Nothing was downloaded, and starting the job again is safe - it often " +
+          "succeeds on a second attempt.",
       );
     }
 
@@ -690,6 +851,9 @@ async function finish(phase) {
  * available in a terminal and that keeps long downloads alive after the shell
  * closes.
  */
+// Exported for scripts/preflight-test.mjs. Not part of the MCP surface.
+export { preflightSpotify };
+
 export async function runJob(id) {
   jobId = id;
   logPath = path.join(appDataDir(), "logs", `${id}.log`);
