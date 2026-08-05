@@ -36,8 +36,9 @@ before he does.
 | # | Item | State | Evidence / blocker |
 |---|------|-------|--------------------|
 | C1 | End-to-end via installed extension | **BLOCKED - needs the metadata fix first** | Partially proven: album completes 10/10 through MCP; the playlist branch has run metadata (116 tracks resolved) and downloading (23 files landed) through the *installed* extension. Not proven: a playlist running to completion with counts reconciled. Blocked by C7 - the playlist path cannot reliably reach the download phase |
-| C7 | `spotdl save` has no read timeout | **MITIGATED, not cured** | Root cause measured in iteration 6: ~50 concurrent sockets to Spotify, blocked in `read`, no `sleep` frames, no save file after 474s. Cannot be fixed inside the bundled binary. Mitigated in v0.3.4 by a size-scaled budget and honest copy. Full cure is the Web API rewrite - still open, needs Adam |
-| C8 | Shared credential pool is quota-exhausted | **DONE (v0.3.4)** | Measured live: 429 `QUOTA_EXCEEDED`, `Retry-After: 86400`. Preflight now fails in **950ms** with the reset time and the workaround, against 474s of silence before. `scripts/preflight-test.mjs`, 31/31 |
+| C7 | `spotdl save` has no read timeout | **DONE (v0.4.0)** | Cured by removing `spotdl save` from the metadata path entirely. `server/spotify.js` resolves the list in 2 paginated requests with a per-request timeout. Live: **116 tracks, 5.95s**, all required keys present, 116/116 unique positions - against 474s and no file |
+| C8 | Shared credential pool is quota-exhausted | **DONE (v0.4.0)** | Measured live: 429 `QUOTA_EXCEEDED`, `Retry-After: 86400`. Now surfaced immediately with the reset time and the self-serve fix, rather than slept through. Quota is per app, so a user's own credentials give their own quota |
+| C9 | Save file matches spotDL's `Song` dataclass | **DONE** | spotDL loads it with `cls(**data)`, so a missing required key is a TypeError at download time. `scripts/schema-test.mjs`, 46/46, pins all 19 required and 11 optional fields. Found 2 real bugs: `spotify:` URIs failed to parse, and any host was accepted |
 | C2 | Status distinguishes stalled | **DONE** | Fault tests cover dead worker (pid that cannot exist) and alive-but-silent (live pid, stale timestamp). Both report honestly |
 | C3 | Watchdog fires honestly | **DONE** | `scripts/watchdog-test.mjs`, 11/11. Includes the dangerous shape: a process that traps SIGTERM and exits 0 is still flagged timedOut, so a kill can never read as a clean finish |
 | C4 | Menu bar for a fresh install | **DONE** | v0.3.3 installed; launched from the installed path, `System Events` reports `menu bars: 1`. The bare binary reported none. Objective, not "look at your screen" |
@@ -52,6 +53,46 @@ before he does.
 | Signed + notarized | v0.3.1 submitted, engines sign and verify | 2026-08-05 |
 
 ## Log
+
+- 2026-08-05 - Iteration 7. **The hang is cured, not mitigated.** v0.4.0
+  removes `spotdl save` from the metadata path entirely.
+
+  Two measurements settled it. With Adam's own working credentials, a direct
+  paginated API read of the 116-track playlist took **1.41s**, while
+  `spotdl save` on a **10-track album** with the *same* credentials still hung
+  past 5 minutes. That killed the last alternative explanation: not quota, not
+  credentials, not playlist size, not lyrics. It is spotdl's own concurrency
+  with no socket read timeout.
+
+  `server/spotify.js` resolves the list in 2 paginated requests and writes the
+  save file the download phase already consumes. Live end to end: **116 tracks,
+  5.95s**, zero missing required keys, 116/116 unique list positions, correct
+  label / ISRC / cover / year. Progress now reports real numbers during the
+  phase that used to be an unbroken silence.
+
+  Deliberately no fallback to `spotdl save` - falling back to a path that hangs
+  forever would convert a clear failure back into the silence being removed.
+
+  **Defects found by testing, not by Adam:**
+  1. `spotify:playlist:<id>` URIs failed to parse.
+  2. The link parser matched on path shape anywhere in the string, so
+     `https://example.com/playlist/<id>` and `https://spotify.com.evil.net/...`
+     were both accepted as Spotify links.
+  3. `install-local.mjs` hash-verified only 4 files; `spotify.js` and `jobs.js`
+     could have installed stale and silent - the exact failure the hash check
+     exists to prevent.
+  4. Today's own preflight was left as dead code carrying a second copy of the
+     buggy parser. Removed rather than left to diverge.
+
+  **On the credential design.** Adam pushed back on adding his own credentials
+  as the answer, correctly: shipping one account's credentials makes every
+  user's traffic land on that quota, and Spotify's terms prohibit distributing
+  them. Quota is per app, so self-serve per-user is the only design without a
+  shared failure domain - which is precisely what broke today, when spotdl's
+  shared pool locked out every install on earth for 24 hours simultaneously.
+  Built-in credentials remain a fallback so a first run works with no setup;
+  when that pool is dry the user now gets a 1-second explanation and the
+  two-minute fix instead of eight minutes of nothing.
 
 - 2026-08-05 - Iteration 6. **Third hypothesis disproven, and the hang finally
   has a measured cause.**
