@@ -73,7 +73,7 @@ server.stdin.write(
 
 const tools = await request("tools/list");
 const names = (tools.result?.tools || []).map((t) => t.name);
-check("tools/list returns 6 tools", names.length === 6, names.join(", "));
+check("tools/list returns 7 tools", names.length === 7, names.join(", "));
 
 const setup = await request("tools/call", {
   name: "check_setup",

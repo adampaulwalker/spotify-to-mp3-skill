@@ -30,7 +30,7 @@ done
 
 echo "=== 3. Quarantine survival (what a downloaded copy faces) ==="
 QT="$(mktemp -d)"
-BUNDLE="$ROOT/spotify-playlist-downloader-0.2.4.mcpb"
+BUNDLE="$ROOT/spotify-playlist-downloader-0.3.1.mcpb"
 if [ -f "$BUNDLE" ]; then
   cp "$BUNDLE" "$QT/b.mcpb"
   xattr -w com.apple.quarantine "0083;0;Safari;$(uuidgen)" "$QT/b.mcpb"

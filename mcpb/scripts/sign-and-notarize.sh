@@ -13,7 +13,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUNDLE="$ROOT/spotify-playlist-downloader-0.2.4.mcpb"
+BUNDLE="$ROOT/spotify-playlist-downloader-0.3.1.mcpb"
 VENDOR="$ROOT/vendor/darwin-arm64"
 KEYCHAIN_PROFILE="${NOTARY_PROFILE:-spotify-mcpb-notary}"
 
@@ -76,7 +76,7 @@ fi
 ENTITLEMENTS="$ROOT/scripts/pyinstaller.entitlements"
 
 echo "==> signing bundled engines"
-for bin in ffmpeg spotdl yt-dlp; do
+for bin in ffmpeg spotdl yt-dlp spotify-statusbar; do
   path="$VENDOR/$bin"
   [ -f "$path" ] || { echo "missing $path" >&2; exit 1; }
 
@@ -108,7 +108,7 @@ done
 # runtime blocks that, it needs an entitlement to allow unsigned executable
 # memory. Verify by running it, not by assuming.
 echo "==> confirming the signed engines still execute"
-for bin in ffmpeg spotdl yt-dlp; do
+for bin in ffmpeg spotdl yt-dlp; do   # statusbar excluded: GUI app, no --version, would hang
   arg="--version"; [ "$bin" = "ffmpeg" ] && arg="-version"
   if "$VENDOR/$bin" "$arg" >/dev/null 2>&1; then
     echo "    OK  $bin"

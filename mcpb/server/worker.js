@@ -5,7 +5,7 @@
 //
 //   node worker.js <jobId>
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdir, readdir, writeFile, appendFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -20,6 +20,17 @@ import { loadJob, mergeJob, isCancelRequested } from "./jobs.js";
 
 const AUDIO_EXTS = new Set([".mp3", ".m4a", ".opus", ".flac"]);
 const POLL_MS = 4000;
+
+// Silence budgets differ by phase because expected behaviour differs.
+//
+// `spotdl save` resolves every track against the Spotify API and logs nothing
+// between "Found N songs" and completion - on a 100+ track playlist that gap is
+// legitimately long, so a short timeout would kill healthy runs.
+//
+// The download phase logs a line per track, so prolonged silence there means
+// something is actually wrong.
+const METADATA_SILENCE_MS = 15 * 60 * 1000;
+const DOWNLOAD_SILENCE_MS = 5 * 60 * 1000;
 
 // The leading list position is not decoration. Without it, two tracks with the
 // same artist and title - a clean and an explicit cut, or the same song on two
@@ -71,6 +82,7 @@ async function countAudioFiles(dir) {
 }
 
 let currentChild = null;
+let latestLine = "";
 
 /**
  * Kill the whole process tree, not just the process we spawned. spotDL forks
@@ -102,7 +114,7 @@ function killTree(child) {
  * output; never rejects on a non-zero exit, because the caller has to decide
  * whether a given code means "some tracks missing" or "nothing worked".
  */
-function run(bin, args, { onLine } = {}) {
+function run(bin, args, { onLine, silenceMs = 5 * 60 * 1000 } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -110,6 +122,30 @@ function run(bin, args, { onLine } = {}) {
       detached: !IS_WINDOWS,
     });
     currentChild = child;
+
+    // Output watchdog, at the level of every engine invocation.
+    //
+    // The engines have no internal timeout. A dropped connection kills their
+    // in-flight requests and they sit there with a live process and no output,
+    // forever. Observed three times: 30 Spotify requests failing in the same
+    // millisecond during metadata resolution, then permanent silence.
+    //
+    // The download phase had a stall detector keyed on new files appearing, but
+    // metadata writes no files, so nothing guarded it. Guarding output here
+    // covers every phase, including any added later.
+    let silenceTimer = null;
+    let timedOut = false;
+    const resetSilence = () => {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(() => {
+        timedOut = true;
+        log(`WATCHDOG: no engine output for ${Math.round(silenceMs / 1000)}s, stopping`).catch(
+          () => {},
+        );
+        killTree(child);
+      }, silenceMs);
+    };
+    resetSilence();
 
     const tail = [];
     let buffered = "";
@@ -120,7 +156,9 @@ function run(bin, args, { onLine } = {}) {
       buffered = lines.pop() ?? "";
       for (const line of lines) {
         if (!line.trim()) continue;
+        resetSilence();
         log(line).catch(() => {});
+        latestLine = line;
         tail.push(line);
         if (tail.length > 40) tail.shift();
         onLine?.(line);
@@ -129,10 +167,14 @@ function run(bin, args, { onLine } = {}) {
 
     child.stdout.on("data", handle);
     child.stderr.on("data", handle);
-    child.on("error", reject);
+    child.on("error", (err) => {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      reject(err);
+    });
     child.on("close", (code, signal) => {
+      if (silenceTimer) clearTimeout(silenceTimer);
       currentChild = null;
-      resolve({ code, signal, tail: tail.join("\n") });
+      resolve({ code, signal, timedOut, tail: tail.join("\n") });
     });
   });
 }
@@ -179,6 +221,68 @@ function notify(title, message) {
   ).unref();
 }
 
+/**
+ * Write a self-refreshing progress page next to the music.
+ *
+ * The chat window is turn-based, so an extension cannot push a live widget into
+ * it. This is the workaround: a plain HTML file that reloads itself from disk
+ * every few seconds, showing whatever the worker last wrote. Open it once and
+ * it moves on its own.
+ *
+ * Deliberately no local server and no port. A meta-refresh on a file:// page
+ * needs no network, works offline, and adds no security surface.
+ */
+async function writeProgressPage(dir, state) {
+  const { playlistName, done, total, phase, lastLine } = state;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const finished = ["completed", "failed", "cancelled"].includes(phase);
+  const esc = (t) =>
+    String(t ?? "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]);
+
+  const html = `<!doctype html><meta charset="utf-8">
+${finished ? "" : '<meta http-equiv="refresh" content="4">'}
+<title>${esc(playlistName)} - ${pct}%</title>
+<style>
+:root{color-scheme:light dark}
+body{font:16px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+     margin:0;display:grid;place-items:center;min-height:100vh;
+     background:#0f1117;color:#e6e8ec}
+@media(prefers-color-scheme:light){body{background:#fff;color:#1a1a2e}}
+.card{width:min(560px,90vw);padding:8px}
+h1{font-size:1.35rem;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:#9aa4b2;margin:0 0 28px;font-size:.95rem}
+.track{font-variant-numeric:tabular-nums;font-size:2.6rem;font-weight:600;
+       letter-spacing:-.02em;margin:0 0 14px}
+.track span{font-size:1.1rem;font-weight:400;color:#9aa4b2}
+.bar{height:10px;border-radius:99px;background:#262b35;overflow:hidden}
+@media(prefers-color-scheme:light){.bar{background:#e5e7eb}}
+.fill{height:100%;width:${pct}%;border-radius:99px;background:#16a34a;
+      transition:width .6s ease}
+.done .fill{background:#16a34a}
+.failed .fill{background:#dc2626}
+.now{margin:22px 0 0;color:#9aa4b2;font-size:.9rem;
+     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.status{margin:26px 0 0;font-size:.9rem;color:#9aa4b2}
+</style>
+<div class="card">
+  <h1>${esc(playlistName)}</h1>
+  <p class="sub">${finished ? "Finished" : "Downloading"}</p>
+  <p class="track">${done}<span> / ${total || "?"} tracks</span></p>
+  <div class="bar ${phase === "failed" ? "failed" : finished ? "done" : ""}"><div class="fill"></div></div>
+  <p class="now">${esc(lastLine || "")}</p>
+  <p class="status">${
+    finished
+      ? "You can close this page."
+      : "This page updates itself. Leave it open."
+  }</p>
+</div>`;
+  try {
+    await writeFile(path.join(dir, "progress.html"), html);
+  } catch {
+    /* a progress page is a nicety; never fail a download over it */
+  }
+}
+
 /** Checked at every phase boundary as well as by the watcher. */
 function isCancelled() {
   if (cancelSeen) return true;
@@ -186,7 +290,33 @@ function isCancelled() {
   return cancelSeen;
 }
 
+/**
+ * Bring up the menu bar indicator if it is not already there.
+ *
+ * The menu bar is the only surface on macOS that is always on screen, which is
+ * where a job measured in tens of minutes belongs. The chat window cannot be
+ * pushed to, and a progress page only helps while you are looking at it.
+ *
+ * The indicator is a read-only viewer over the same job files, so a second copy
+ * or a killed copy is harmless. It exits on its own from its Quit menu.
+ */
+function ensureStatusBar() {
+  if (IS_WINDOWS) return;
+  const bin = enginePath("spotify-statusbar");
+  if (!bin) return;
+  try {
+    const running = spawnSync("pgrep", ["-f", "spotify-statusbar"], {
+      encoding: "utf8",
+    });
+    if (running.status === 0 && running.stdout.trim()) return;
+    spawn(bin, [], { detached: true, stdio: "ignore" }).unref();
+  } catch {
+    /* the indicator is a nicety; never fail a download over it */
+  }
+}
+
 async function main() {
+  ensureStatusBar();
   const job = await loadJob(jobId);
   if (!job) {
     process.stderr.write(`worker: job ${jobId} not found\n`);
@@ -220,15 +350,24 @@ async function main() {
       );
     }
 
-    const saved = await run(spotdl, [
-      "save",
-      job.url,
-      "--save-file",
-      saveFile,
-      ...credArgs,
-    ]);
+    const saved = await run(
+      spotdl,
+      ["save", job.url, "--save-file", saveFile, ...credArgs],
+      { silenceMs: METADATA_SILENCE_MS },
+    );
 
     if (isCancelled()) return finish("cancelled");
+
+    // Checked before the exit code, and separately from it. A watchdog kill can
+    // still exit 0 if the engine handles SIGTERM cleanly, in which case the
+    // save file is truncated and parsing it would silently drop tracks.
+    if (saved.timedOut) {
+      throw new Error(
+        "Reading the track list stalled: the engine produced no output for " +
+          `${METADATA_SILENCE_MS / 60000} minutes. This is usually a dropped ` +
+          "network connection. Nothing was downloaded; starting the job again is safe.",
+      );
+    }
 
     if (saved.code !== 0) {
       throw new Error(
@@ -283,6 +422,10 @@ async function main() {
       if (current && count !== current.trackCount) {
         await mergeJob(jobId, { trackCount: count });
         lastProgressAt = Date.now();
+        await writeProgressPage(outputDir, {
+          playlistName, done: count, total: tracks.length,
+          phase: "downloading", lastLine: latestLine,
+        });
         const pct = Math.floor((count / tracks.length) * 100);
         const milestone = Math.floor(pct / 25) * 25;
         if (milestone > lastMilestone && milestone < 100) {
@@ -326,7 +469,7 @@ async function main() {
         "--save-errors",
         errorsLog,
         ...credArgs,
-      ]);
+      ], { silenceMs: DOWNLOAD_SILENCE_MS });
     } finally {
       clearInterval(poll);
     }
@@ -363,6 +506,7 @@ async function main() {
     // An earlier version only flagged this when NOTHING was explained, which
     // missed the common mixed case: one real failure logged, then a crash.
     const crashed =
+      Boolean(result.timedOut) ||
       Boolean(result.signal) ||
       (result.code !== 0 && unexplainedCount(failed) > 0);
 
@@ -385,6 +529,10 @@ async function main() {
     });
     const fresh = await loadJob(jobId);
     await writeReport(outputDir, fresh);
+    await writeProgressPage(outputDir, {
+      playlistName, done: downloaded, total: tracks.length,
+      phase: "completed", lastLine: "",
+    });
     const missing = missingTrackCount(fresh);
     notify(
       `${fresh.playlistName || "Download"} finished`,

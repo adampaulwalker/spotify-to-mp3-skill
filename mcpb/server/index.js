@@ -13,7 +13,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { spawn } from "node:child_process";
 import { runJob } from "./worker.js";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -23,6 +23,7 @@ import {
   unsupportedPlatformReason,
   isQuarantined,
   BUNDLE_ROOT,
+  appDataDir,
 } from "./paths.js";
 import {
   createJob,
@@ -40,7 +41,7 @@ const SPOTIFY_URL =
   /^https?:\/\/open\.spotify\.com\/(intl-[a-z]{2}\/)?(playlist|album|track)\/[A-Za-z0-9]+/;
 
 const server = new Server(
-  { name: "spotify-playlist-downloader", version: "0.2.4" },
+  { name: "spotify-playlist-downloader", version: "0.3.1" },
   { capabilities: { tools: {} } },
 );
 
@@ -89,19 +90,96 @@ function probeEngine(bin, args, timeoutMs = 45000) {
   });
 }
 
+/**
+ * How long since the engine last wrote anything, in seconds, or null if there is
+ * no log yet.
+ *
+ * This is the only signal that separates "working" from "hung". Phase and track
+ * count are both static during metadata resolution - spotDL reads 100+ tracks
+ * without logging per track - so a status reply built on those alone forces the
+ * model to guess, and it guesses "give it another minute" forever.
+ */
+function secondsSinceEngineOutput(jobId) {
+  try {
+    const p = path.join(appDataDir(), "logs", `${jobId}.log`);
+    return Math.round((Date.now() - statSync(p).mtimeMs) / 1000);
+  } catch {
+    return null;
+  }
+}
+
+function humanDuration(sec) {
+  if (sec == null) return "unknown";
+  if (sec < 90) return `${sec}s`;
+  if (sec < 5400) return `${Math.round(sec / 60)} min`;
+  return `${(sec / 3600).toFixed(1)} hours`;
+}
+
 function describe(job) {
   const j = reconcile(job);
   const pct =
     j.trackTotal && j.trackCount
       ? ` (${Math.round((j.trackCount / j.trackTotal) * 100)}%)`
       : "";
+  const bar = (() => {
+    if (!j.trackTotal) return null;
+    const pct = Math.round((j.trackCount / j.trackTotal) * 100);
+    const filled = Math.round((j.trackCount / j.trackTotal) * 24);
+    return `${"\u2588".repeat(filled)}${"\u2591".repeat(24 - filled)}  ${pct}%`;
+  })();
+
   const lines = [
     `Job ${j.id} - ${j.phase}`,
     j.playlistName ? `Playlist: ${j.playlistName}` : `URL: ${j.url}`,
     `Downloaded: ${j.trackCount}${j.trackTotal ? ` of ${j.trackTotal}` : ""}${pct}`,
   ];
+  if (bar) lines.push(bar);
   if (j.outputDir) lines.push(`Folder: ${j.outputDir}`);
   if (j.error) lines.push(`Error: ${j.error}`);
+
+  // Liveness and pace, so the answer distinguishes progress from a stall
+  // instead of leaving that to inference.
+  const active = !["completed", "failed", "cancelled"].includes(j.phase);
+  if (active) {
+    const quiet = secondsSinceEngineOutput(j.id);
+    const started = Date.parse(j.createdAt);
+    const elapsed = Number.isFinite(started)
+      ? Math.round((Date.now() - started) / 1000)
+      : null;
+
+    lines.push(`Running for: ${humanDuration(elapsed)}`);
+    lines.push(
+      quiet == null
+        ? "Engine output: none yet"
+        : `Last engine output: ${humanDuration(quiet)} ago`,
+    );
+
+    if (j.phase === "fetching_metadata") {
+      lines.push(
+        "Reading the track list from Spotify. This stage is quiet by design - " +
+          "the engine resolves every track before it logs again, which takes " +
+          "a few minutes on a large playlist. No files are written yet.",
+      );
+    }
+
+    if (j.trackCount > 0 && elapsed) {
+      const perTrack = elapsed / j.trackCount;
+      const left = j.trackTotal ? j.trackTotal - j.trackCount : 0;
+      if (left > 0) {
+        lines.push(
+          `Pace: about ${humanDuration(Math.round(perTrack))} per track, ` +
+            `roughly ${humanDuration(Math.round(perTrack * left))} remaining`,
+        );
+      }
+    }
+
+    if (quiet != null && quiet > 600) {
+      lines.push(
+        `WARNING: nothing for ${humanDuration(quiet)}. This job may be stuck; ` +
+          "it will stop itself after 15 minutes of no progress.",
+      );
+    }
+  }
 
   // Count missing tracks, not report entries - one aggregate entry can stand
   // for several tracks, so failed.length would understate the total.
@@ -179,6 +257,16 @@ const TOOLS = [
     name: "open_output_folder",
     description:
       "Open the folder containing the downloaded music in Finder or File Explorer.",
+    inputSchema: {
+      type: "object",
+      properties: { job_id: { type: "string" } },
+      required: ["job_id"],
+    },
+  },
+  {
+    name: "show_progress",
+    description:
+      "Open a live progress window for a download. The page updates itself every few seconds, so it can be left open on screen instead of asking for status repeatedly.",
     inputSchema: {
       type: "object",
       properties: { job_id: { type: "string" } },
@@ -334,6 +422,24 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         await requestCancel(id);
         return text(
           `Cancelling job ${job.id}. Tracks already downloaded are kept in ${job.outputDir || "the output folder"}.`,
+        );
+      }
+
+      case "show_progress": {
+        const job = await loadJob(String(args.job_id || ""));
+        if (!job) return text(`No job with id ${args.job_id}.`);
+        const page = job.outputDir
+          ? path.join(job.outputDir, "progress.html")
+          : null;
+        if (!page || !existsSync(page)) {
+          return text(
+            "No progress window yet. It appears once downloading starts - " +
+              "reading the track list from Spotify comes first and writes no files.",
+          );
+        }
+        spawn("open", [page], { detached: true, stdio: "ignore" }).unref();
+        return text(
+          "Opened the progress window. It refreshes itself, so you can leave it open.",
         );
       }
 
