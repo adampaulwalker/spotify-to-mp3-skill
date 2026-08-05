@@ -15,6 +15,7 @@ import {
   sanitizeFolderName,
   appDataDir,
   IS_WINDOWS,
+  BUNDLE_ROOT,
 } from "./paths.js";
 import { loadJob, mergeJob, isCancelRequested } from "./jobs.js";
 
@@ -302,14 +303,18 @@ function isCancelled() {
  */
 function ensureStatusBar() {
   if (IS_WINDOWS) return;
-  const bin = enginePath("spotify-statusbar");
-  if (!bin) return;
+  // A .app, not a bare executable. A bare Mach-O launches and stays resident
+  // but never shows a menu bar item; the identical code inside a .app with
+  // LSUIElement appears immediately. The first build shipped the bare binary,
+  // so the feature was dead for everyone who installed the bundle.
+  const app = path.join(BUNDLE_ROOT, "vendor", "darwin-arm64", "SpotifyProgress.app");
+  if (!existsSync(app)) return;
   try {
-    const running = spawnSync("pgrep", ["-f", "spotify-statusbar"], {
+    const running = spawnSync("pgrep", ["-f", "SpotifyProgress"], {
       encoding: "utf8",
     });
     if (running.status === 0 && running.stdout.trim()) return;
-    spawn(bin, [], { detached: true, stdio: "ignore" }).unref();
+    spawn("open", [app], { detached: true, stdio: "ignore" }).unref();
   } catch {
     /* the indicator is a nicety; never fail a download over it */
   }

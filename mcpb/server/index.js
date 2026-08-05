@@ -61,7 +61,15 @@ const text = (s) => ({ content: [{ type: "text", text: s }] });
  * PyInstaller bundle that unpacks itself on first run, so the timeout is
  * generous enough for a cold start on a slow disk.
  */
-function probeEngine(bin, args, timeoutMs = 45000) {
+// 3 minutes, not 45 seconds.
+//
+// spotdl and yt-dlp are PyInstaller bundles that extract an embedded Python
+// runtime to a temp directory on every launch. Measured cold starts: 10s idle,
+// 38s under a load average of 10. A 45s ceiling reported "Something is wrong
+// with the bundled engines" on a perfectly healthy install, which sends the
+// user to reinstall for nothing. A diagnostic that cries wolf is worse than no
+// diagnostic.
+function probeEngine(bin, args, timeoutMs = 180000) {
   return new Promise((resolve) => {
     const p = enginePath(bin);
     if (!p) {
@@ -74,7 +82,9 @@ function probeEngine(bin, args, timeoutMs = 45000) {
       child.kill("SIGKILL");
       resolve({
         ok: false,
-        line: `TIMEOUT  ${bin}  did not respond within ${timeoutMs / 1000}s`,
+        line:
+          `SLOW     ${bin}  still starting after ${Math.round(timeoutMs / 1000)}s - ` +
+          "this usually means a busy machine, not a broken install",
       });
     }, timeoutMs);
 

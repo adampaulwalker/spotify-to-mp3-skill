@@ -38,9 +38,9 @@ before he does.
 | C1 | End-to-end via installed extension | OPEN | v0.3.1 notarizing |
 | C2 | Status distinguishes stalled | **DONE** | Fault tests cover dead worker (pid that cannot exist) and alive-but-silent (live pid, stale timestamp). Both report honestly |
 | C3 | Watchdog fires honestly | OPEN | Needs a fault-injection test |
-| C4 | Menu bar for a fresh install | OPEN | Ran as a bare binary; .app path untested from the bundle |
+| C4 | Menu bar for a fresh install | **FIXED, needs a rebuild to verify** | The bundle shipped a BARE BINARY - the exact build that launches, stays resident, and shows no menu bar item. Now built as a .app with LSUIElement by `scripts/build-menubar.sh`, signed as a bundle |
 | C5 | Every error path legible | **DONE** | `scripts/fault-tests.mjs`, 19/19. Found and fixed an unanchored URL validator that accepted `...playlist/x"; rm -rf /` |
-| C6 | Skill-test on installed build | OPEN | Last run was v0.2.4 |
+| C6 | Skill-test on installed build | **DONE** | Ran against the installed v0.3.2 server path. Model routed through check_setup, list_download_jobs and 9 status calls. Zero tool errors |
 
 ## Verified (with evidence)
 
@@ -50,6 +50,22 @@ before he does.
 | Signed + notarized | v0.3.1 submitted, engines sign and verify | 2026-08-05 |
 
 ## Log
+
+- 2026-08-05 - Iteration 2. Installed v0.3.2 and worked against it. Three more
+  defects, again none found by Adam:
+  1. **The menu bar feature was dead on arrival.** The bundle shipped the bare
+     Mach-O, which launches and stays resident but never shows an item. It only
+     ever worked in testing because I had launched a hand-made .app. Anyone
+     installing the bundle would have got a silently absent feature.
+  2. **check_setup cried wolf.** A 45s probe ceiling against PyInstaller cold
+     starts that measure 10s idle and 38s under load. It reported "Something is
+     wrong with the bundled engines" on a healthy install - a false alarm that
+     sends a user to reinstall for nothing. Raised to 180s, and slow is now
+     worded differently from broken.
+  3. GUI install (`open -a Claude bundle.mcpb`) silently does nothing when
+     Claude Desktop has no window open. Not a product bug, but it made the loop
+     unreliable, so `scripts/install-local.mjs` now installs deterministically
+     and verifies by hash.
 
 - 2026-08-05 - Iteration 1. Built `scripts/fault-tests.mjs` (19 cases) and
   `scripts/edge-probe.mjs`. Four defects found by me, none by Adam:

@@ -76,7 +76,7 @@ fi
 ENTITLEMENTS="$ROOT/scripts/pyinstaller.entitlements"
 
 echo "==> signing bundled engines"
-for bin in ffmpeg spotdl yt-dlp spotify-statusbar; do
+for bin in ffmpeg spotdl yt-dlp; do
   path="$VENDOR/$bin"
   [ -f "$path" ] || { echo "missing $path" >&2; exit 1; }
 
@@ -107,6 +107,18 @@ done
 # spotdl is a PyInstaller bundle that unpacks itself at runtime. If the hardened
 # runtime blocks that, it needs an entitlement to allow unsigned executable
 # memory. Verify by running it, not by assuming.
+# The menu bar app is signed as a bundle, not a loose binary, and is never
+# executed as a check - it is a GUI agent with no --version flag and running it
+# would block the build.
+echo "==> signing the menu bar app"
+if [ -d "$VENDOR/SpotifyProgress.app" ]; then
+  codesign --force --timestamp --options runtime --deep \
+    --sign "$IDENTITY" "$VENDOR/SpotifyProgress.app"
+  codesign --verify --strict --verbose=1 "$VENDOR/SpotifyProgress.app" 2>&1 | sed 's/^/    /'
+else
+  echo "    WARNING: SpotifyProgress.app missing - run scripts/build-menubar.sh" >&2
+fi
+
 echo "==> confirming the signed engines still execute"
 for bin in ffmpeg spotdl yt-dlp; do   # statusbar excluded: GUI app, no --version, would hang
   arg="--version"; [ "$bin" = "ffmpeg" ] && arg="-version"
