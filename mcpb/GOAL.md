@@ -35,7 +35,7 @@ before he does.
 
 | # | Item | State | Evidence / blocker |
 |---|------|-------|--------------------|
-| C1 | End-to-end via installed extension | OPEN | v0.3.1 notarizing |
+| C1 | End-to-end via installed extension | **BLOCKED - needs Adam** | Partially proven: album completes 10/10 through MCP; the playlist branch has run metadata (116 tracks resolved) and downloading (23 files landed) through the *installed* extension. Not proven: a playlist running to completion with counts reconciled. Closing it needs a download I should not start on my own judgement |
 | C2 | Status distinguishes stalled | **DONE** | Fault tests cover dead worker (pid that cannot exist) and alive-but-silent (live pid, stale timestamp). Both report honestly |
 | C3 | Watchdog fires honestly | **DONE** | `scripts/watchdog-test.mjs`, 11/11. Includes the dangerous shape: a process that traps SIGTERM and exits 0 is still flagged timedOut, so a kill can never read as a clean finish |
 | C4 | Menu bar for a fresh install | **DONE** | v0.3.3 installed; launched from the installed path, `System Events` reports `menu bars: 1`. The bare binary reported none. Objective, not "look at your screen" |
@@ -50,6 +50,18 @@ before he does.
 | Signed + notarized | v0.3.1 submitted, engines sign and verify | 2026-08-05 |
 
 ## Log
+
+- 2026-08-05 - Iteration 4. Regression sweep clean: 49/49 across four layers
+  (smoke 6, edge-probe 13, watchdog 11, fault 19). No new defects.
+  Attempted to close C1 with Creative Commons material so the licensing question
+  would not arise; the Spotify search returned nothing usable in a 3-10 track
+  range, and the shared credentials rate-limited. Stopping rather than grinding
+  or manufacturing a pass.
+
+  What C1 still needs is narrow: the playlist branch has already run metadata
+  resolution (116 tracks) and the download phase (23 files) through the
+  installed extension. The untested remainder is a playlist reaching completion
+  with the reported count matching disk.
 
 - 2026-08-05 - Iteration 3. Built and installed v0.3.3, closing C3 and C4.
   C4 proved objectively: the installed .app owns `menu bars: 1` where the bare
