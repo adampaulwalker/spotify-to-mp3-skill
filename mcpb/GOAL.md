@@ -37,8 +37,8 @@ before he does.
 |---|------|-------|--------------------|
 | C1 | End-to-end via installed extension | OPEN | v0.3.1 notarizing |
 | C2 | Status distinguishes stalled | **DONE** | Fault tests cover dead worker (pid that cannot exist) and alive-but-silent (live pid, stale timestamp). Both report honestly |
-| C3 | Watchdog fires honestly | OPEN | Needs a fault-injection test |
-| C4 | Menu bar for a fresh install | **FIXED, needs a rebuild to verify** | The bundle shipped a BARE BINARY - the exact build that launches, stays resident, and shows no menu bar item. Now built as a .app with LSUIElement by `scripts/build-menubar.sh`, signed as a bundle |
+| C3 | Watchdog fires honestly | **DONE** | `scripts/watchdog-test.mjs`, 11/11. Includes the dangerous shape: a process that traps SIGTERM and exits 0 is still flagged timedOut, so a kill can never read as a clean finish |
+| C4 | Menu bar for a fresh install | **DONE** | v0.3.3 installed; launched from the installed path, `System Events` reports `menu bars: 1`. The bare binary reported none. Objective, not "look at your screen" |
 | C5 | Every error path legible | **DONE** | `scripts/fault-tests.mjs`, 19/19. Found and fixed an unanchored URL validator that accepted `...playlist/x"; rm -rf /` |
 | C6 | Skill-test on installed build | **DONE** | Ran against the installed v0.3.2 server path. Model routed through check_setup, list_download_jobs and 9 status calls. Zero tool errors |
 
@@ -50,6 +50,15 @@ before he does.
 | Signed + notarized | v0.3.1 submitted, engines sign and verify | 2026-08-05 |
 
 ## Log
+
+- 2026-08-05 - Iteration 3. Built and installed v0.3.3, closing C3 and C4.
+  C4 proved objectively: the installed .app owns `menu bars: 1` where the bare
+  binary owned none. C3 proved by `scripts/watchdog-test.mjs`, whose most
+  valuable case is a process that traps SIGTERM and exits 0 - checking the exit
+  code alone would call that a clean finish and report a truncated track list as
+  complete. That was the actual bug in my first watchdog, and it is now a
+  standing regression test rather than a memory.
+  Only C1 remains: a real playlist end to end through the installed extension.
 
 - 2026-08-05 - Iteration 2. Installed v0.3.2 and worked against it. Three more
   defects, again none found by Adam:
