@@ -56,6 +56,18 @@ const server = new Server(
 
 const text = (s) => ({ content: [{ type: "text", text: s }] });
 
+// One job at a time in this process.
+//
+// Downloads run in-process (Claude Desktop is Electron; spawning a child
+// launches a second copy of the app), and worker.js keeps its per-job state -
+// jobId, the current child process, the cancel flag - at module scope. A second
+// concurrent job would overwrite the first job's id, at which point the first
+// job's logging and cancellation start targeting the second. Both jobs corrupt.
+//
+// Refused rather than queued: someone who asks for a download should be told it
+// is waiting, not left watching nothing happen.
+let activeJobId = null;
+
 /**
  * Execute an engine with a short timeout and report the real error. spotdl is a
  * PyInstaller bundle that unpacks itself on first run, so the timeout is
@@ -361,6 +373,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "start_playlist_download": {
+        if (activeJobId) {
+          const running = await loadJob(activeJobId);
+          return text(
+            `A download is already running${running?.playlistName ? ` (${running.playlistName})` : ""}. ` +
+              "Only one runs at a time, so the two do not interfere with each other. " +
+              `Wait for it to finish, or cancel it first with job id ${activeJobId}.`,
+          );
+        }
         const url = String(args.url || "").trim();
         if (!SPOTIFY_URL.test(url)) {
           return text(
@@ -401,7 +421,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         // and a design property that never once worked is worth less than a
         // download that starts. The CLI still spawns a real detached process,
         // where a real node exists.
-        runJob(job.id).catch(() => {});
+        activeJobId = job.id;
+        runJob(job.id)
+          .catch(() => {})
+          .finally(() => {
+            if (activeJobId === job.id) activeJobId = null;
+          });
         await updateJob(job.id, { workerPid: process.pid });
 
         return text(
