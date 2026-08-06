@@ -111,10 +111,23 @@ could not be found and why.</p>
     <p><a href="https://github.com/adampaulwalker/spotify-to-mp3-skill/releases/latest/download/spotify-playlist-downloader.mcpb">Download the extension</a>
     and double-click it. Claude Desktop installs it.</p></div></div>
   <div class="step"><div class="num">2</div><div>
-    <p>Restart Claude Desktop.</p></div></div>
+    <p>Create a free Spotify app for it - two minutes, no coding. Sign in at
+    <a href="https://developer.spotify.com/dashboard">developer.spotify.com/dashboard</a>,
+    click <b>Create app</b>, give it any name, and tick the terms box. Then open the
+    app's <b>Settings</b> and copy its <b>Client ID</b> and <b>Client Secret</b> into the
+    extension's settings in Claude Desktop. This gives you your own connection to
+    Spotify instead of one shared with every other user.</p></div></div>
   <div class="step"><div class="num">3</div><div>
+    <p>Restart Claude Desktop.</p></div></div>
+  <div class="step"><div class="num">4</div><div>
     <p>Paste a Spotify link into a conversation and ask for it. Then ask how it
     is going whenever you like, or ask Claude to open the folder.</p></div></div>
+
+  <p style="margin-top:18px;color:var(--muted);font-size:.93rem">
+    Tip: pick <b>Haiku 4.5</b> in the model menu and turn <b>Extended thinking</b>
+    off before starting a download. Downloads involve many quick check-ins rather
+    than hard thinking, so the fast model relays progress promptly and spends far
+    less of your usage doing it.</p>
 
   <p style="margin-top:18px;color:var(--muted);font-size:.93rem">
     Signed and notarized with Apple, so it just opens. No terminal, no security
@@ -143,7 +156,8 @@ node cli.js --cancel &lt;jobId&gt;</code></pre>
   <tr><th>Requirement</th><th>Why</th></tr>
   <tr><td>A Mac with Apple Silicon</td><td>The audio engine is only published as an Apple Silicon build. Intel Macs cannot run it</td></tr>
   <tr><td>Claude Desktop, any plan</td><td>Only for the extension. The terminal version needs neither</td></tr>
-  <tr><td>Nothing else</td><td>The engines are bundled. No Homebrew, no Python, no Spotify developer account</td></tr>
+  <tr><td>A free Spotify app</td><td>Two minutes at developer.spotify.com - it is your own connection to Spotify, so your downloads never share a rate limit with strangers. The install steps walk through it</td></tr>
+  <tr><td>Nothing else</td><td>The engines are bundled. No Homebrew, no Python</td></tr>
 </table>
 
 <h2>Where it runs, and where it does not</h2>
@@ -163,9 +177,10 @@ used to read the track list. The audio is found on public sources by matching
 title, artist, and duration.</p></details>
 
 <details><summary>Do I need a Spotify developer account?</summary>
-<p>No. There is an optional setting for your own API credentials, which only
-matters if you hit a rate limit on the shared default connection. Most people
-never need it.</p></details>
+<p>Yes, a free one - the install steps walk through it and it takes about two
+minutes. Spotify rate-limits each app, so a shared built-in connection means
+every user of this extension stands in one line, and that line was measured
+locking out for a full day. Your own free app is your own line.</p></details>
 
 <details><summary>Some tracks did not download. Why?</summary>
 <p>A track can be unavailable everywhere the tool looks, or age-restricted, or
