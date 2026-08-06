@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "spotify-playlist-downloader",
   "display_name": "Spotify Playlist Downloader",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Save audio files for the tracks on a Spotify playlist. Reads the playlist for track names only; finds the audio on public sources.",
   "long_description": "Paste a Spotify playlist link and this saves the songs as tagged audio files in your Downloads folder. Everything runs on your own machine, and the audio engines are bundled, so there is nothing to install and no terminal to open. Spotify's own audio is copy-protected and is never touched: the playlist link is used to read the track list, and the audio is found on public sources.",
   "author": {
@@ -67,16 +67,16 @@
   "user_config": {
     "spotify_client_id": {
       "type": "string",
-      "title": "Spotify Client ID (optional)",
-      "description": "Leave blank unless downloads start failing with rate limit errors. Everyone shares a default connection to Spotify, which occasionally gets busy. Creating a free app at developer.spotify.com/dashboard gives you your own.",
-      "required": false,
+      "title": "Spotify Client ID",
+      "description": "Required. Spotify limits how much each app can read, and that limit is per app - so your own free app means your own limit, not one shared with every other user. To get one: sign in at developer.spotify.com/dashboard, click Create app, give it any name and description, tick the terms box, then open Settings on the new app and copy the Client ID here. Takes about two minutes and costs nothing.",
+      "required": true,
       "sensitive": true
     },
     "spotify_client_secret": {
       "type": "string",
-      "title": "Spotify Client Secret (optional)",
-      "description": "The matching secret for the Client ID above.",
-      "required": false,
+      "title": "Spotify Client Secret",
+      "description": "Required. On the same Settings page as the Client ID, click \"View client secret\" and copy the value here. Keep it to yourself - it identifies your app to Spotify.",
+      "required": true,
       "sensitive": true
     }
   },

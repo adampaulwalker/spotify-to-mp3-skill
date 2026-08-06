@@ -62,12 +62,24 @@ rmSync(dest, { recursive: true, force: true });
 mkdirSync(dest, { recursive: true });
 execFileSync("unzip", ["-qo", bundle, "-d", dest]);
 
+// Merge, never overwrite. This file holds the user's saved settings - including
+// the Spotify credentials they typed into the extension's own settings panel.
+// Writing {"isEnabled": true} over it silently wiped them, so every reinstall
+// looked fine and then failed to authenticate for a reason nothing explained.
 const settingsDir = path.join(BASE, "Claude Extensions Settings");
 mkdirSync(settingsDir, { recursive: true });
-writeFileSync(
-  path.join(settingsDir, `${id}.json`),
-  JSON.stringify({ isEnabled: true }, null, 2),
-);
+const settingsFile = path.join(settingsDir, `${id}.json`);
+let settings = {};
+if (existsSync(settingsFile)) {
+  try {
+    settings = JSON.parse(readFileSync(settingsFile, "utf8"));
+  } catch {
+    settings = {}; // unreadable, so there is nothing to preserve
+  }
+}
+const keptKeys = Object.keys(settings.userConfig ?? {});
+writeFileSync(settingsFile, JSON.stringify({ ...settings, isEnabled: true }, null, 2));
+if (keptKeys.length) console.log(`  kept user settings: ${keptKeys.join(", ")}`);
 
 const registry = JSON.parse(readFileSync(REGISTRY, "utf8"));
 registry.extensions ??= {};
