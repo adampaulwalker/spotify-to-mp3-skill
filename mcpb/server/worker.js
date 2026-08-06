@@ -481,6 +481,31 @@ async function main() {
     const downloaded = Math.min(await countAudioFiles(outputDir), tracks.length);
     const failed = await readFailures(errorsLog, tracks.length, downloaded);
 
+    // A watchdog kill is diagnosed FIRST, before the exit code and before the
+    // count, for the same reason it is in the metadata phase: a killed engine
+    // can still exit 0, and nothing it failed to attempt is evidence about
+    // whether those tracks exist.
+    //
+    // This ordering was wrong in a shipped build and produced exactly the
+    // misdiagnosis it was meant to prevent. A 116-track playlist was killed by
+    // the 5-minute silence watchdog and reported as "No tracks could be
+    // downloaded from any source", which reads as "your playlist is not on
+    // YouTube". It sent the user checking engines and trying other formats for
+    // a problem that was a timeout.
+    if (result.timedOut) {
+      await mergeJob(jobId, { trackCount: downloaded, failed, outputDir });
+      throw new Error(
+        `The download engine went quiet for ${DOWNLOAD_SILENCE_MS / 60000} minutes and was ` +
+          `stopped, after ${downloaded} of ${tracks.length} tracks.\n\n` +
+          "This is a stall, not a problem with the playlist - the tracks it had not reached yet " +
+          "were never looked for, so nothing here says they are unavailable.\n\n" +
+          (downloaded === 0
+            ? "Large playlists can take a few minutes to produce their first result. Starting the " +
+              "job again is safe."
+            : "Starting the job again is safe and will pick up where this left off."),
+      );
+    }
+
     // A non-zero exit with nothing downloaded is a real failure, not a playlist
     // where a few tracks were unavailable. Reporting that as "completed with 0
     // of 50" would hide a broken ffmpeg or an unwritable folder.

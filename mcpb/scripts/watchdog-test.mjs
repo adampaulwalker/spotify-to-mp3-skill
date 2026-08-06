@@ -92,6 +92,36 @@ check(
   "download phase treats a timeout as a crash",
   /Boolean\(result\.timedOut\)/.test(worker),
 );
+
+// The download phase had the metadata phase's bug, and it shipped: a 116-track
+// playlist was killed by the silence watchdog and reported as "No tracks could
+// be downloaded from any source" - which reads as "your playlist is not on
+// YouTube" and sent the user checking engines and changing formats.
+//
+// A killed engine can exit 0, and tracks it never reached are not evidence
+// about whether they exist. So timedOut must be diagnosed before both the exit
+// code and the downloaded count.
+check(
+  "download phase checks timedOut BEFORE the zero-download branch",
+  worker.indexOf("if (result.timedOut)") > -1 &&
+    worker.indexOf("if (result.timedOut)") < worker.indexOf("if (downloaded === 0)"),
+);
+{
+  // The two messages must not be reachable from the same state.
+  const timeoutMsg = /went quiet for[\s\S]{0,600}?\);/.exec(worker)?.[0] ?? "";
+  check(
+    "a stall is never described as unavailable tracks",
+    timeoutMsg.length > 0 && !/from any source/.test(timeoutMsg),
+  );
+  check(
+    "the stall message says the rest were never attempted",
+    /never looked for|never attempted/.test(timeoutMsg),
+  );
+  check(
+    "and tells the user retrying is safe",
+    /starting the job again is safe/i.test(timeoutMsg),
+  );
+}
 check(
   "the failure message says how far it got",
   /stopped early after \$\{downloaded\} of \$\{tracks\.length\} tracks/.test(worker),
