@@ -73,9 +73,12 @@ function quotaMessage(usingOwn, retryAfterSec) {
     "Spotify's limit for this app's shared credentials is used up, so the track list cannot be " +
     `read right now. It resets in ${wait}.\n\n` +
     "To avoid waiting - and to stop sharing a limit with every other user of this extension - " +
-    "add your own free Spotify credentials in this extension's settings: create an app at " +
-    "developer.spotify.com/dashboard, then paste its Client ID and Client Secret into the " +
-    "Client ID and Client Secret fields.\n\nNothing was downloaded."
+    "add your own free Spotify credentials in this extension's settings. At " +
+    "developer.spotify.com/dashboard click Create app: name it anything NOT starting with " +
+    '"Spot", set the Redirect URI to exactly http://127.0.0.1:8888/callback (the form ' +
+    "requires one; this tool never uses it), tick Web API and the terms box, then Save. " +
+    "Copy the app's Client ID and Client Secret from its Settings page into the " +
+    "extension's settings.\n\nNothing was downloaded."
   );
 }
 

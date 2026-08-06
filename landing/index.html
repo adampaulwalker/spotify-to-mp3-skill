@@ -111,12 +111,24 @@ could not be found and why.</p>
     <p><a href="https://github.com/adampaulwalker/spotify-to-mp3-skill/releases/latest/download/spotify-playlist-downloader.mcpb">Download the extension</a>
     and double-click it. Claude Desktop installs it.</p></div></div>
   <div class="step"><div class="num">2</div><div>
-    <p>Create a free Spotify app for it - two minutes, no coding. Sign in at
-    <a href="https://developer.spotify.com/dashboard">developer.spotify.com/dashboard</a>,
-    click <b>Create app</b>, give it any name, and tick the terms box. Then open the
-    app's <b>Settings</b> and copy its <b>Client ID</b> and <b>Client Secret</b> into the
-    extension's settings in Claude Desktop. This gives you your own connection to
-    Spotify instead of one shared with every other user.</p></div></div>
+    <p>Create a free Spotify app for it - a couple of minutes, no coding. This gives
+    you your own connection to Spotify instead of one shared with every other user.
+    Sign in at <a href="https://developer.spotify.com/dashboard">developer.spotify.com/dashboard</a>,
+    click <b>Create app</b>, and fill the form exactly like this:</p>
+    <ul style="margin:10px 0 0 18px">
+      <li><b>App name</b> - anything that does <b>not</b> start with "Spot" (Spotify
+        rejects those). "My Playlist Tool" works.</li>
+      <li><b>App description</b> - anything, e.g. "personal playlist tool".</li>
+      <li><b>Website</b> - leave blank.</li>
+      <li><b>Redirect URIs</b> - required by the form even though this tool never uses
+        it. Paste exactly <code>http://127.0.0.1:8888/callback</code> and click
+        <b>Add</b>.</li>
+      <li><b>Which API/SDKs</b> - tick <b>Web API</b>.</li>
+      <li>Tick the terms box and click <b>Save</b>.</li>
+    </ul>
+    <p style="margin-top:10px">Then open the new app's <b>Settings</b>, copy the
+    <b>Client ID</b>, click <b>View client secret</b> and copy that too. Paste both
+    into the extension's settings in Claude Desktop.</p></div></div>
   <div class="step"><div class="num">3</div><div>
     <p>Restart Claude Desktop.</p></div></div>
   <div class="step"><div class="num">4</div><div>
