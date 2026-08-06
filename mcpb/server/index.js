@@ -50,7 +50,7 @@ const SPOTIFY_URL =
   /^https?:\/\/open\.spotify\.com\/(intl-[a-z]{2}\/)?(playlist|album|track)\/[A-Za-z0-9]{16,32}(\?[A-Za-z0-9_=&%.-]*)?$/;
 
 const server = new Server(
-  { name: "spotify-playlist-downloader", version: "0.5.3" },
+  { name: "spotify-playlist-downloader", version: "0.5.4" },
   { capabilities: { tools: {} } },
 );
 
@@ -551,18 +551,34 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           });
         await updateJob(job.id, { workerPid: process.pid });
 
-        return text(
-          [
-            `Started. Job id: ${job.id}`,
-            "",
-            // Instruction in the returned text, not only in the tool description.
-            // The model reads this back mid-conversation, which steers it far more
-            // reliably than a description it saw once when the tools were listed.
-            `NEXT STEP: call watch_download with job_id "${job.id}" now, and show the ` +
-              "user the progress bar from its output verbatim rather than summarising it. " +
-              "Repeat the call until the download reaches completed, failed, or cancelled.",
-          ].join("\n"),
-        );
+        // Hold the reply until there is something real to show. Metadata takes
+        // a few seconds, so waiting for it means the START reply already
+        // carries the playlist name, the track count, and the 0% bar - the
+        // user sees a progress display immediately, not contingent on the
+        // model choosing to make a follow-up call. Measured need: the start
+        // reply used to say only "Started", the model ignored the NEXT STEP
+        // instruction, and the user got nothing until they asked. Bounded at
+        // 20s so a slow Spotify cannot push this reply into client-timeout
+        // territory; a metadata failure (quota, bad link) surfaces here too,
+        // immediately and legibly, instead of on a later status call.
+        {
+          const deadline = Date.now() + 20000;
+          let j = await loadJob(job.id);
+          while (
+            Date.now() < deadline &&
+            j &&
+            j.phase === "fetching_metadata"
+          ) {
+            await new Promise((r) => setTimeout(r, 1000));
+            j = await loadJob(job.id);
+          }
+          return text(
+            `${describe(j ?? job)}\n\n` +
+              `NEXT STEP: call watch_download with job_id "${job.id}" now, and show the ` +
+              "user the progress from its output verbatim, bar included, rather than " +
+              "summarising it. Repeat until the phase is completed, failed, or cancelled.",
+          );
+        }
       }
 
       case "get_download_status": {
