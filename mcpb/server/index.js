@@ -50,7 +50,7 @@ const SPOTIFY_URL =
   /^https?:\/\/open\.spotify\.com\/(intl-[a-z]{2}\/)?(playlist|album|track)\/[A-Za-z0-9]{16,32}(\?[A-Za-z0-9_=&%.-]*)?$/;
 
 const server = new Server(
-  { name: "spotify-playlist-downloader", version: "0.5.1" },
+  { name: "spotify-playlist-downloader", version: "0.5.2" },
   { capabilities: { tools: {} } },
 );
 
@@ -432,9 +432,20 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
         // A quarantined engine is killed by Gatekeeper with no output at all,
         // so name that cause explicitly rather than leaving the user with an
         // unexplained failure.
-        const quarantined = ["spotdl", "ffmpeg", "yt-dlp"].filter((b) =>
-          isQuarantined(enginePath(b)),
-        );
+        //
+        // Gated on an engine actually FAILING, not on the flag being present.
+        // Once the bundle is notarized the flag is still set on every extracted
+        // file - that is normal and harmless - and testing for the flag alone
+        // told a healthy install it was blocked, in the same breath as
+        // reporting all three engines OK, and handed the user an alarming
+        // Terminal command to fix nothing. Caught by installing a quarantined
+        // copy of the notarized bundle, which is the only test that reproduces
+        // what someone downloading it gets.
+        const quarantined = ok
+          ? []
+          : ["spotdl", "ffmpeg", "yt-dlp"].filter((b) =>
+              isQuarantined(enginePath(b)),
+            );
 
         const lines = [
           ok
