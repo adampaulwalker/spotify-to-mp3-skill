@@ -73,7 +73,20 @@ server.stdin.write(
 
 const tools = await request("tools/list");
 const names = (tools.result?.tools || []).map((t) => t.name);
-check("tools/list returns 7 tools", names.length === 7, names.join(", "));
+// Named, not just counted. A bare count passes when a tool is swapped for
+// another, and it fails noisily for the harmless case of adding one.
+for (const t of [
+  "start_playlist_download",
+  "get_download_status",
+  "list_download_jobs",
+  "cancel_download",
+  "open_output_folder",
+  "show_progress",
+  "watch_download",
+  "check_setup",
+]) {
+  check(`tools/list exposes ${t}`, names.includes(t));
+}
 
 const setup = await request("tools/call", {
   name: "check_setup",

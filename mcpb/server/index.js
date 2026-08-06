@@ -305,6 +305,25 @@ const TOOLS = [
     },
   },
   {
+    name: "watch_download",
+    description:
+      "Follow a running download and report progress live in this conversation. Prefer this " +
+      "over calling get_download_status repeatedly: it stays open and streams updates as tracks " +
+      "land, instead of returning one snapshot. Call it right after starting a download. It " +
+      "returns on its own when the download finishes or when max_minutes elapses.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: { type: "string" },
+        max_minutes: {
+          type: "number",
+          description: "How long to keep watching before returning. Default 10.",
+        },
+      },
+      required: ["job_id"],
+    },
+  },
+  {
     name: "check_setup",
     description:
       "Verify the extension is correctly installed and that its bundled download tools " +
@@ -316,11 +335,78 @@ const TOOLS = [
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
+server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   const { name, arguments: args = {} } = req.params;
+
+  // Instrumentation, deliberately kept in the shipped build.
+  //
+  // In-chat progress depends entirely on whether the client asks for it: MCP
+  // only allows progress notifications against a progressToken the client
+  // supplies in _meta. No Claude Desktop log on this machine has ever contained
+  // one, across every MCP server installed, but those logs redact params - so
+  // absence there is not evidence. This line settles it from the receiving end
+  // rather than by assumption.
+  process.stderr.write(
+    `tool ${name} _meta=${JSON.stringify(req.params._meta ?? null)}\n`,
+  );
+  const progressToken = req.params._meta?.progressToken;
 
   try {
     switch (name) {
+      case "watch_download": {
+        const job = await loadJob(String(args.job_id ?? ""));
+        if (!job) return text(`No download with id ${args.job_id}.`);
+
+        const deadline =
+          Date.now() + Math.min(60, Math.max(1, Number(args.max_minutes) || 10)) * 60000;
+        const terminal = ["completed", "failed", "cancelled"];
+
+        // progress MUST increase on every notification per the MCP spec, even
+        // when the underlying count has not moved. A download can sit on the
+        // same track for a minute, so a monotonic tick is sent alongside the
+        // real count rather than repeating a value the client may drop.
+        let tick = 0;
+        let last = null;
+
+        while (Date.now() < deadline) {
+          const j = reconcile(await loadJob(job.id));
+          if (!j) break;
+
+          const done = j.trackCount ?? 0;
+          const total = j.trackTotal ?? 0;
+          const line =
+            j.phase === "fetching_metadata"
+              ? "Reading the track list from Spotify"
+              : total
+                ? `${done} of ${total} tracks downloaded`
+                : `${done} tracks downloaded`;
+
+          if (progressToken && line !== last) {
+            await extra
+              .sendNotification({
+                method: "notifications/progress",
+                params: {
+                  progressToken,
+                  progress: total ? done : ++tick,
+                  ...(total ? { total } : {}),
+                  message: line,
+                },
+              })
+              .catch(() => {});
+            last = line;
+          }
+
+          if (terminal.includes(j.phase)) return text(describe(j));
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+
+        const j = reconcile(await loadJob(job.id));
+        return text(
+          `Still running after ${args.max_minutes ?? 10} minutes.\n\n${describe(j)}\n\n` +
+            "Call watch_download again to keep following it.",
+        );
+      }
+
       case "check_setup": {
         const blocked = unsupportedPlatformReason();
         if (blocked) return text(blocked);
