@@ -145,8 +145,21 @@ async function request(url, init, { usingOwn }) {
 
     if (!res.ok) {
       throw new SpotifyError(
-        `Spotify returned an unexpected error while reading the track list. ` +
-          "Trying again in a few minutes usually clears it - nothing was downloaded.",
+        // The status code stays in the message. An earlier version hid it to
+        // keep the text friendly, and the first real remote failure - a fresh
+        // install on someone else's machine - became undiagnosable: "unexpected
+        // error" with the one distinguishing fact stripped out. One code in
+        // parentheses costs a non-technical reader nothing and tells whoever is
+        // helping them everything.
+        `Spotify returned an unexpected error while reading the track list ` +
+          `(HTTP ${res.status}). Trying again in a few minutes sometimes clears it - ` +
+          "nothing was downloaded.\n\n" +
+          (res.status === 403
+            ? "A 403 on a newly created Spotify app usually means the app cannot read this " +
+              "playlist: Spotify-made playlists (Top 50, Discover Weekly, editorial mixes) " +
+              "are not readable by new apps. Try a playlist created by a person - your own, " +
+              "or any public user playlist."
+            : ""),
         "network",
       );
     }
@@ -362,4 +375,41 @@ export async function resolveTracks(url, { onProgress = () => {} } = {}) {
       listMeta ? { ...listMeta, position: i + 1, length: total } : null,
     );
   });
+}
+
+/**
+ * One cheap live probe for check_setup: are the credentials in use actually
+ * accepted by Spotify right now?
+ *
+ * This exists because the first real remote failure happened on a machine
+ * where nothing could be inspected, and check_setup - the tool whose whole job
+ * is "tell me what is wrong" - never made a single Spotify call. It verified
+ * the engines and stayed silent on the half of the system that actually fails
+ * in the field: credentials and quota.
+ *
+ * Uses the search endpoint rather than a specific playlist so the result
+ * reflects the credentials, not one playlist's visibility.
+ */
+export async function probeCredentials() {
+  const creds = credentials();
+  const which = creds.usingOwn
+    ? "your own Spotify app from the extension settings"
+    : "the built-in shared credentials (no Client ID set in the extension settings)";
+  try {
+    const token = await getToken(creds);
+    const res = await request(
+      `${API}/search?q=test&type=track&limit=1`,
+      { headers: { Authorization: `Bearer ${token}` } },
+      creds,
+    );
+    if (res?.tracks) return { ok: true, line: `OK       spotify  reachable, using ${which}` };
+    return { ok: true, line: `OK       spotify  token accepted, using ${which}` };
+  } catch (err) {
+    const msg = err instanceof SpotifyError ? err.message : String(err?.message ?? err);
+    return {
+      ok: false,
+      line: `FAILED   spotify  using ${which}`,
+      detail: msg,
+    };
+  }
 }

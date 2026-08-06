@@ -13,6 +13,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { spawn } from "node:child_process";
 import { runJob } from "./worker.js";
+import { probeCredentials } from "./spotify.js";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,7 +51,7 @@ const SPOTIFY_URL =
   /^https?:\/\/open\.spotify\.com\/(intl-[a-z]{2}\/)?(playlist|album|track)\/[A-Za-z0-9]{16,32}(\?[A-Za-z0-9_=&%.-]*)?$/;
 
 const server = new Server(
-  { name: "spotify-playlist-downloader", version: "0.5.5" },
+  { name: "spotify-playlist-downloader", version: "0.5.6" },
   { capabilities: { tools: {} } },
 );
 
@@ -448,6 +449,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           ].map(([bin, args]) => probeEngine(bin, args)),
         );
 
+        // The engines are half the system; credentials and quota are the half
+        // that actually fails in the field. One live Spotify call closes the
+        // gap that made the first remote failure undiagnosable: check_setup
+        // said "all engines OK" on a machine whose downloads could not start.
+        const spotifyProbe = await probeCredentials();
+        results.push(spotifyProbe);
+
         const ok = results.every((r) => r.ok);
 
         // A quarantined engine is killed by Gatekeeper with no output at all,
@@ -488,6 +496,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
             "",
             `  xattr -dr com.apple.quarantine "${path.join(BUNDLE_ROOT, "vendor")}"`,
           );
+        }
+
+        if (!spotifyProbe.ok && spotifyProbe.detail) {
+          lines.push("", "The Spotify connection is the problem:", spotifyProbe.detail);
         }
 
         lines.push("", `Music will be saved to: ${defaultOutputRoot()}`);
