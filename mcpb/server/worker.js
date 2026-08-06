@@ -6,7 +6,7 @@
 //   node worker.js <jobId>
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdir, readdir, writeFile, appendFile, readFile } from "node:fs/promises";
+import { mkdir, readdir, writeFile, appendFile, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import {
@@ -719,6 +719,26 @@ export async function runJob(id) {
   } catch (err) {
     await log(`FATAL ${err?.stack || err}`);
     notify("Download failed", String(err?.message || err).slice(0, 180));
+
+    // Remove the output folder if the run left nothing in it. A failed job used
+    // to leave an empty, job-id-suffixed folder in Downloads forever, so a few
+    // failed attempts buried the real folder among decoys with the same name.
+    // Only ever removed when it holds no files at all, so a partial download is
+    // never thrown away.
+    try {
+      const j = await loadJob(id);
+      if (j?.outputDir && existsSync(j.outputDir)) {
+        const left = await readdir(j.outputDir);
+        const junk = new Set(["progress.html", "download-report.txt", ".DS_Store"]);
+        if (left.every((f) => junk.has(f))) {
+          await rm(j.outputDir, { recursive: true, force: true });
+          await log(`removed empty output folder ${j.outputDir}`);
+        }
+      }
+    } catch {
+      /* tidying is a nicety; never mask the real failure with a cleanup error */
+    }
+
     await mergeJob(id, {
       phase: "failed",
       error: String(err?.message || err),

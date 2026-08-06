@@ -50,7 +50,7 @@ const SPOTIFY_URL =
   /^https?:\/\/open\.spotify\.com\/(intl-[a-z]{2}\/)?(playlist|album|track)\/[A-Za-z0-9]{16,32}(\?[A-Za-z0-9_=&%.-]*)?$/;
 
 const server = new Server(
-  { name: "spotify-playlist-downloader", version: "0.3.3" },
+  { name: "spotify-playlist-downloader", version: "0.5.1" },
   { capabilities: { tools: {} } },
 );
 
@@ -160,6 +160,10 @@ function describe(job) {
   })();
 
   const lines = [
+    // Marked so the model passes it through instead of paraphrasing. The bar was
+    // always in this output; what reached the user was "Still early - 0 of 116",
+    // because a model sits between this text and the screen.
+    "SHOW THIS TO THE USER VERBATIM, INCLUDING THE BAR:",
     `Job ${j.id} - ${j.phase}`,
     j.playlistName ? `Playlist: ${j.playlistName}` : `URL: ${j.url}`,
     `Downloaded: ${j.trackCount}${j.trackTotal ? ` of ${j.trackTotal}` : ""}${pct}`,
@@ -187,9 +191,8 @@ function describe(job) {
 
     if (j.phase === "fetching_metadata") {
       lines.push(
-        "Reading the track list from Spotify. This stage is quiet by design - " +
-          "the engine resolves every track before it logs again, which takes " +
-          "a few minutes on a large playlist. No files are written yet.",
+        "Reading the track list from Spotify. This takes a few seconds even for a " +
+          "large playlist. No files are written yet.",
       );
     }
 
@@ -243,7 +246,8 @@ const TOOLS = [
       "and never accessed. The audio itself is located on public sources (YouTube, SoundCloud, Bandcamp) " +
       "by matching title, artist and duration, and is downloaded from there. " +
       "Returns a job id immediately; the download continues in the background. " +
-      "Use get_download_status to check progress.",
+      "IMMEDIATELY AFTER this returns, call watch_download with the job id so the user can " +
+      "see progress while it runs. Do not just report that it started and stop.",
     inputSchema: {
       type: "object",
       properties: {
@@ -519,7 +523,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           [
             `Started. Job id: ${job.id}`,
             "",
-            "The download runs in the background, so this may take a while for a long playlist. Ask me to check the status whenever you like.",
+            // Instruction in the returned text, not only in the tool description.
+            // The model reads this back mid-conversation, which steers it far more
+            // reliably than a description it saw once when the tools were listed.
+            `NEXT STEP: call watch_download with job_id "${job.id}" now, and show the ` +
+              "user the progress bar from its output verbatim rather than summarising it. " +
+              "Repeat the call until the download reaches completed, failed, or cancelled.",
           ].join("\n"),
         );
       }
