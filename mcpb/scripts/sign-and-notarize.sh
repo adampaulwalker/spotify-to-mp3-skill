@@ -13,7 +13,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUNDLE="$ROOT/spotify-playlist-downloader-0.3.3.mcpb"
+# Version comes from the manifest, never a literal. This was pinned at 0.3.3
+# while the manifest moved to 0.5.1, so the script notarized current code under
+# a stale filename - and since Claude Desktop refuses to replace an install of
+# the same version, shipping that would have silently kept old code running on
+# the user's machine.
+VERSION="$(python3 -c "import json;print(json.load(open('$ROOT/manifest.json'))['version'])")"
+BUNDLE="$ROOT/spotify-playlist-downloader-$VERSION.mcpb"
 VENDOR="$ROOT/vendor/darwin-arm64"
 KEYCHAIN_PROFILE="${NOTARY_PROFILE:-spotify-mcpb-notary}"
 
