@@ -50,7 +50,7 @@ const SPOTIFY_URL =
   /^https?:\/\/open\.spotify\.com\/(intl-[a-z]{2}\/)?(playlist|album|track)\/[A-Za-z0-9]{16,32}(\?[A-Za-z0-9_=&%.-]*)?$/;
 
 const server = new Server(
-  { name: "spotify-playlist-downloader", version: "0.5.2" },
+  { name: "spotify-playlist-downloader", version: "0.5.3" },
   { capabilities: { tools: {} } },
 );
 
@@ -311,17 +311,18 @@ const TOOLS = [
   {
     name: "watch_download",
     description:
-      "Follow a running download and report progress live in this conversation. Prefer this " +
-      "over calling get_download_status repeatedly: it stays open and streams updates as tracks " +
-      "land, instead of returning one snapshot. Call it right after starting a download. It " +
-      "returns on its own when the download finishes or when max_minutes elapses.",
+      "Follow a running download. Waits until the progress meaningfully changes (or ~45s), " +
+      "then returns the current progress bar. LOOP THIS: show the user the returned bar " +
+      "verbatim, then call watch_download again, until the download reaches completed, " +
+      "failed, or cancelled. Each return is one heartbeat of a progress display the user " +
+      "watches in the conversation.",
     inputSchema: {
       type: "object",
       properties: {
         job_id: { type: "string" },
-        max_minutes: {
+        wait_seconds: {
           type: "number",
-          description: "How long to keep watching before returning. Default 10.",
+          description: "Longest single wait before returning a heartbeat. Default 45, max 120.",
         },
       },
       required: ["job_id"],
@@ -358,56 +359,76 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   try {
     switch (name) {
       case "watch_download": {
+        // Short-cycle heartbeat, not a long-lived stream.
+        //
+        // The first version blocked for up to ten minutes and streamed MCP
+        // progress notifications against the request's progressToken. Measured
+        // in Claude Desktop on a real 116-track run: the user watched a bare
+        // spinner and reported "doesn't seem to be doing anything" while the
+        // download was in fact at 12/116 - so whatever notifications were sent,
+        // nothing rendered. A blocking call whose feedback channel does not
+        // render is indistinguishable from a hang.
+        //
+        // (Claude Desktop also swallows server stderr, so the _meta
+        // instrumentation intended to settle the progressToken question never
+        // reached any log. Both wires were dark.)
+        //
+        // So the text channel is the only one proven to reach the user, and the
+        // cadence comes from returning: wait until progress meaningfully
+        // changes, or ~45s, whichever is first - then return the bar and have
+        // the model print it and call again. Notifications are still sent when
+        // a token exists, as a free upgrade for clients that render them.
         const job = await loadJob(String(args.job_id ?? ""));
         if (!job) return text(`No download with id ${args.job_id}.`);
 
-        const deadline =
-          Date.now() + Math.min(60, Math.max(1, Number(args.max_minutes) || 10)) * 60000;
+        const waitMs =
+          Math.min(120, Math.max(10, Number(args.wait_seconds) || 45)) * 1000;
+        const deadline = Date.now() + waitMs;
         const terminal = ["completed", "failed", "cancelled"];
 
-        // progress MUST increase on every notification per the MCP spec, even
-        // when the underlying count has not moved. A download can sit on the
-        // same track for a minute, so a monotonic tick is sent alongside the
-        // real count rather than repeating a value the client may drop.
+        const snapshot = (j) => `${j.phase}:${j.trackCount ?? 0}`;
+        const first = reconcile(await loadJob(job.id));
+        if (!first) return text(`No download with id ${args.job_id}.`);
+        const before = snapshot(first);
         let tick = 0;
-        let last = null;
 
-        while (Date.now() < deadline) {
-          const j = reconcile(await loadJob(job.id));
-          if (!j) break;
+        let j = first;
+        while (Date.now() < deadline && !terminal.includes(j.phase)) {
+          await new Promise((r) => setTimeout(r, 3000));
+          j = reconcile(await loadJob(job.id)) ?? j;
 
-          const done = j.trackCount ?? 0;
-          const total = j.trackTotal ?? 0;
-          const line =
-            j.phase === "fetching_metadata"
-              ? "Reading the track list from Spotify"
-              : total
-                ? `${done} of ${total} tracks downloaded`
-                : `${done} tracks downloaded`;
-
-          if (progressToken && line !== last) {
+          if (progressToken) {
+            const done = j.trackCount ?? 0;
+            const total = j.trackTotal ?? 0;
             await extra
               .sendNotification({
                 method: "notifications/progress",
                 params: {
                   progressToken,
-                  progress: total ? done : ++tick,
+                  // progress MUST increase on every notification per the spec,
+                  // even while the count holds still on a slow track.
+                  progress: total ? done + tick++ / 1000 : ++tick,
                   ...(total ? { total } : {}),
-                  message: line,
+                  message:
+                    j.phase === "fetching_metadata"
+                      ? "Reading the track list from Spotify"
+                      : `${done} of ${total || "?"} tracks downloaded`,
                 },
               })
               .catch(() => {});
-            last = line;
           }
 
-          if (terminal.includes(j.phase)) return text(describe(j));
-          await new Promise((r) => setTimeout(r, 3000));
+          // Return as soon as there is something new to show - a moved count or
+          // a phase change - so the chat updates at the pace of the download.
+          if (snapshot(j) !== before) break;
         }
 
-        const j = reconcile(await loadJob(job.id));
+        if (terminal.includes(j.phase)) return text(describe(j));
         return text(
-          `Still running after ${args.max_minutes ?? 10} minutes.\n\n${describe(j)}\n\n` +
-            "Call watch_download again to keep following it.",
+          `${describe(j)}\n\n` +
+            "Show the user the progress above verbatim, then call watch_download " +
+            "again for the next update. Do not stop until the phase is completed, " +
+            "failed, or cancelled.",
         );
       }
 
